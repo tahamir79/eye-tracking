@@ -1,3 +1,5 @@
+// pages/index.js
+
 "use client"; // Ensure the component is treated as a Client Component
 
 import { useEffect, useRef, useState } from 'react';
@@ -7,29 +9,119 @@ import { Camera } from '@mediapipe/camera_utils';
 export default function Home() {
   const videoRef = useRef(null);
   const canvasRef = useRef(null);
-  const dotRef = useRef(null);
-  const [status, setStatus] = useState('Loading model...');
-  const [text, setText] = useState(""); // The text box content
-  const [pointerPosition, setPointerPosition] = useState({ x: 0, y: 0 }); // Track pointer position
-  const [blinkCooldown, setBlinkCooldown] = useState(false); // Cooldown to prevent multiple blinks
-  const EAR_THRESHOLD = 0.2; // Eye Aspect Ratio threshold to detect blinks
+
+  const [cursorPosition, setCursorPosition] = useState({ x: 0, y: 0 });
+  const [typedText, setTypedText] = useState('');
+  const [cooldown, setCooldown] = useState(false);
+
+  const prevCursorPosition = useRef({ x: 0, y: 0 }); // For smoothing
+
+  // Adjusted EAR threshold
+  const EAR_THRESHOLD = 0.25; // You may need to tweak this value
+
+  // Blink detection logic based on Eye Aspect Ratio (EAR)
+  const isBlinking = (landmarks) => {
+    const computeEAR = (eye) => {
+      const p2_p6 = Math.hypot(eye[1].x - eye[5].x, eye[1].y - eye[5].y);
+      const p3_p5 = Math.hypot(eye[2].x - eye[4].x, eye[2].y - eye[4].y);
+      const p1_p4 = Math.hypot(eye[0].x - eye[3].x, eye[0].y - eye[3].y);
+      return (p2_p6 + p3_p5) / (2.0 * p1_p4);
+    };
+
+    const leftEyeIndices = [33, 160, 158, 133, 153, 144];
+    const rightEyeIndices = [362, 385, 387, 263, 373, 380];
+
+    const leftEye = leftEyeIndices.map(index => landmarks[index]);
+    const rightEye = rightEyeIndices.map(index => landmarks[index]);
+
+    const earLeft = computeEAR(leftEye);
+    const earRight = computeEAR(rightEye);
+
+    // Return true if EAR is below the threshold for either eye
+    return earLeft < EAR_THRESHOLD || earRight < EAR_THRESHOLD;
+  };
 
   useEffect(() => {
-    const initializeFaceMesh = async () => {
-      const faceMesh = new FaceMesh({
-        locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh/${file}`,
-      });
+    const videoElement = videoRef.current;
+    const canvasElement = canvasRef.current;
+    const canvasCtx = canvasElement.getContext('2d');
 
-      faceMesh.setOptions({
-        maxNumFaces: 1,
-        refineLandmarks: true, // Enable iris tracking for better eye tracking
-        minDetectionConfidence: 0.5,
-        minTrackingConfidence: 0.5,
-      });
+    const faceMesh = new FaceMesh({
+      locateFile: (file) => {
+        return `https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh/${file}`;
+      },
+    });
 
-      faceMesh.onResults(onResults);
+    faceMesh.setOptions({
+      maxNumFaces: 1,
+      refineLandmarks: true,
+      minDetectionConfidence: 0.5,
+      minTrackingConfidence: 0.5,
+    });
 
-      const videoElement = videoRef.current;
+    faceMesh.onResults((results) => {
+      // Draw the annotations (optional, for debugging)
+      canvasCtx.save();
+      canvasCtx.clearRect(0, 0, canvasElement.width, canvasElement.height);
+      canvasCtx.drawImage(
+        results.image,
+        0,
+        0,
+        canvasElement.width,
+        canvasElement.height
+      );
+      canvasCtx.restore();
+
+      if (results.multiFaceLandmarks && results.multiFaceLandmarks.length > 0) {
+        const landmarks = results.multiFaceLandmarks[0];
+
+        // Calculate gaze direction
+        const leftEyeCenter = {
+          x: (landmarks[33].x + landmarks[133].x) / 2,
+          y: (landmarks[33].y + landmarks[133].y) / 2,
+        };
+        const rightEyeCenter = {
+          x: (landmarks[362].x + landmarks[263].x) / 2,
+          y: (landmarks[362].y + landmarks[263].y) / 2,
+        };
+        const gazePoint = {
+          x: (leftEyeCenter.x + rightEyeCenter.x) / 2,
+          y: (leftEyeCenter.y + rightEyeCenter.y) / 2,
+        };
+
+        // Map gaze point to screen coordinates with x-axis reversed
+        const screenX = (1 - gazePoint.x) * window.innerWidth;
+        const screenY = gazePoint.y * window.innerHeight;
+
+        // Smooth the cursor movement
+        const alpha = 0.2; // Smoothing factor between 0 and 1
+        const smoothedX = alpha * screenX + (1 - alpha) * prevCursorPosition.current.x;
+        const smoothedY = alpha * screenY + (1 - alpha) * prevCursorPosition.current.y;
+
+        setCursorPosition({ x: smoothedX, y: smoothedY });
+
+        prevCursorPosition.current = { x: smoothedX, y: smoothedY };
+
+        // Blink detection
+        if (isBlinking(landmarks) && !cooldown) {
+          setCooldown(true);
+
+          // Get the element at the gaze point
+          const element = document.elementFromPoint(smoothedX, smoothedY);
+
+          if (element && element.dataset && element.dataset.value) {
+            setTypedText((prevText) => prevText + element.dataset.value);
+          }
+
+          // Cooldown to prevent multiple detections
+          setTimeout(() => {
+            setCooldown(false);
+          }, 1000); // Adjust the cooldown duration as needed
+        }
+      }
+    });
+
+    if (typeof window !== 'undefined') {
       const camera = new Camera(videoElement, {
         onFrame: async () => {
           await faceMesh.send({ image: videoElement });
@@ -38,194 +130,76 @@ export default function Home() {
         height: 480,
       });
       camera.start();
-
-      setStatus('Model loaded and webcam is active!');
-    };
-
-    initializeFaceMesh();
-  }, []);
-
-  // Blink detection logic based on Eye Aspect Ratio (EAR)
-  const isBlinking = (landmarks) => {
-    const leftEye = landmarks.slice(33, 42);
-    const rightEye = landmarks.slice(362, 371);
-
-    // Calculate vertical and horizontal distances for both eyes
-    const verticalLeft = Math.sqrt(
-      Math.pow(leftEye[1].x - leftEye[5].x, 2) + Math.pow(leftEye[1].y - leftEye[5].y, 2)
-    );
-    const horizontalLeft = Math.sqrt(
-      Math.pow(leftEye[0].x - leftEye[3].x, 2) + Math.pow(leftEye[0].y - leftEye[3].y, 2)
-    );
-
-    const verticalRight = Math.sqrt(
-      Math.pow(rightEye[1].x - rightEye[5].x, 2) + Math.pow(rightEye[1].y - rightEye[5].y, 2)
-    );
-    const horizontalRight = Math.sqrt(
-      Math.pow(rightEye[0].x - rightEye[3].x, 2) + Math.pow(rightEye[0].y - rightEye[3].y, 2)
-    );
-
-    const earLeft = verticalLeft / horizontalLeft;
-    const earRight = verticalRight / horizontalRight;
-
-    // Return true if both eyes are blinking (EAR is below the threshold)
-    return earLeft < EAR_THRESHOLD && earRight < EAR_THRESHOLD;
-  };
-
-  // Handle the results of the face mesh model
-  const onResults = (results) => {
-    const canvasElement = canvasRef.current;
-    const canvasCtx = canvasElement.getContext('2d');
-
-    canvasElement.width = results.image.width;
-    canvasElement.height = results.image.height;
-
-    canvasCtx.save();
-    canvasCtx.clearRect(0, 0, canvasElement.width, canvasElement.height);
-    canvasCtx.drawImage(results.image, 0, 0, canvasElement.width, canvasElement.height);
-
-    if (results.multiFaceLandmarks && results.multiFaceLandmarks.length > 0) {
-      const landmarks = results.multiFaceLandmarks[0];
-
-      // Detect blink
-      const blinking = isBlinking(landmarks);
-
-      if (blinking && !blinkCooldown) {
-        // Log blink detection in the console
-        console.log('Blink detected!');
-
-        // Trigger click with blink
-        handleBlinkClick();
-
-        // Set cooldown to avoid multiple blinks being detected quickly
-        setBlinkCooldown(true);
-        setTimeout(() => setBlinkCooldown(false), 1000); // 1 second cooldown
-      }
-
-      // Calculate the gaze point based on iris position
-      const leftIris = landmarks[468]; // Left iris center
-      const rightIris = landmarks[473]; // Right iris center
-      const screenWidth = window.innerWidth;
-      const screenHeight = window.innerHeight;
-      const eyeCenterX = (leftIris.x + rightIris.x) / 2;
-      const eyeCenterY = (leftIris.y + rightIris.y) / 2;
-
-      // Adjust the sensitivity factor to increase the scale of movement
-      const sensitivityFactor = 4.0; // Increase this to make the movement more pronounced
-
-      // Reverse X-axis to correct for mirroring and scale the movement
-      const gazeX = screenWidth / 2 - (eyeCenterX - 0.5) * screenWidth * sensitivityFactor;
-      const gazeY = screenHeight / 2 + (eyeCenterY - 0.5) * screenHeight * sensitivityFactor;
-
-      // Move the red dot (pointer)
-      setPointerPosition({ x: gazeX, y: gazeY });
     }
-
-    canvasCtx.restore();
-  };
-
-  // Handle blink click event
-  const handleBlinkClick = () => {
-    const x = pointerPosition.x;
-    const y = pointerPosition.y;
-
-    // Check if the pointer is over a key and blink is detected
-    const keyElements = document.elementsFromPoint(x, y);
-    const key = keyElements.find((el) => el.classList.contains('key'));
-
-    if (key) {
-      const char = key.innerText;
-      if (char === "Backspace") {
-        setText((prev) => prev.slice(0, -1)); // Remove the last character
-      } else {
-        setText((prev) => prev + (char === "Space" ? " " : char)); // Add the character to the text box
-      }
-    }
-  };
-
-  // Handle mouse click event
-  const handleMouseClick = (event) => {
-    const key = event.target;
-    if (key.classList.contains('key')) {
-      const char = key.innerText;
-      if (char === "Backspace") {
-        setText((prev) => prev.slice(0, -1)); // Remove the last character
-      } else {
-        setText((prev) => prev + (char === "Space" ? " " : char)); // Add the character to the text box
-      }
-    }
-  };
+  }, [cooldown]);
 
   return (
     <div>
-      <h1>Gaze-Driven Virtual Keyboard with Blink Detection</h1>
-      <p>{status}</p>
-
-      {/* Text box to display the typed text */}
-      <textarea
-        value={text}
-        readOnly
+      <video ref={videoRef} style={{ display: 'none' }} />
+      <canvas
+        ref={canvasRef}
         style={{
+          display: 'none', // Set to 'block' if you want to see the canvas
+          position: 'absolute',
           width: '100%',
-          height: '100px',
-          fontSize: '24px',
-          marginBottom: '20px',
-          textAlign: 'center',
+          height: '100%',
         }}
       />
 
-      {/* Virtual Keyboard */}
+      {/* Display the cursor */}
       <div
-        style={{ display: 'grid', gridTemplateColumns: 'repeat(10, 1fr)', gap: '10px' }}
-        onClick={handleMouseClick} // Add mouse click event
-      >
-        {['Q', 'W', 'E', 'R', 'T', 'Y', 'U', 'I', 'O', 'P'].map((key) => (
-          <button key={key} className="key" style={keyboardButtonStyle}>
-            {key}
-          </button>
-        ))}
-        {['A', 'S', 'D', 'F', 'G', 'H', 'J', 'K', 'L'].map((key) => (
-          <button key={key} className="key" style={keyboardButtonStyle}>
-            {key}
-          </button>
-        ))}
-        {['Z', 'X', 'C', 'V', 'B', 'N', 'M'].map((key) => (
-          <button key={key} className="key" style={keyboardButtonStyle}>
-            {key}
-          </button>
-        ))}
-        <button className="key" style={keyboardButtonStyle}>
-          Space
-        </button>
-        <button className="key" style={keyboardButtonStyle}>
-          Backspace
-        </button>
-      </div>
-
-      {/* Pointer */}
-      <div
-        ref={dotRef}
         style={{
           position: 'absolute',
-          width: '20px',
-          height: '20px',
+          left: cursorPosition.x - 10,
+          top: cursorPosition.y - 10,
+          width: 20,
+          height: 20,
           borderRadius: '50%',
           backgroundColor: 'red',
-          left: `${pointerPosition.x}px`,
-          top: `${pointerPosition.y}px`,
           pointerEvents: 'none',
         }}
-      />
+      ></div>
 
-      <video ref={videoRef} style={{ display: 'none' }} />
-      <canvas ref={canvasRef} style={{ display: 'none' }} />
+      {/* Display the typed text */}
+      <div
+        style={{
+          position: 'fixed',
+          top: 20,
+          left: 20,
+          fontSize: '24px',
+          backgroundColor: 'white',
+          padding: '10px',
+          borderRadius: '5px',
+        }}
+      >
+        {typedText}
+      </div>
+
+      {/* Display the letters */}
+      <div
+        style={{
+          display: 'grid',
+          gridTemplateColumns: 'repeat(10, 1fr)',
+          gridGap: '10px',
+          marginTop: '100px',
+          textAlign: 'center',
+        }}
+      >
+        {'ABCDEFGHIJKLMNOPQRSTUVWXYZ'.split('').map((letter) => (
+          <div
+            key={letter}
+            data-value={letter}
+            style={{
+              fontSize: '36px',
+              padding: '20px',
+              border: '1px solid black',
+              borderRadius: '5px',
+            }}
+          >
+            {letter}
+          </div>
+        ))}
+      </div>
     </div>
   );
 }
-
-// Style for the keyboard buttons
-const keyboardButtonStyle = {
-  fontSize: '24px',
-  padding: '20px',
-  cursor: 'pointer',
-};
