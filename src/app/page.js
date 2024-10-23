@@ -1,8 +1,6 @@
-// pages/index.js
-
 "use client"; // Ensure the component is treated as a Client Component
 
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, useCallback } from 'react';
 import { FaceMesh } from '@mediapipe/face_mesh';
 import { Camera } from '@mediapipe/camera_utils';
 
@@ -15,19 +13,19 @@ export default function Home() {
   const [cooldown, setCooldown] = useState(false);
 
   const prevCursorPosition = useRef({ x: 0, y: 0 }); // For smoothing
+  const cooldownRef = useRef(null); // Use a ref to track cooldown state
 
-  // Adjusted EAR threshold
-  const EAR_THRESHOLD = 0.25; // You may need to tweak this value
+  const EAR_THRESHOLD = 0.25; // Adjust this value if needed
 
-  // Blink detection logic based on Eye Aspect Ratio (EAR)
+  // Compute Eye Aspect Ratio (EAR) to detect blinks
+  const computeEAR = (eye) => {
+    const p2_p6 = Math.hypot(eye[1].x - eye[5].x, eye[1].y - eye[5].y);
+    const p3_p5 = Math.hypot(eye[2].x - eye[4].x, eye[2].y - eye[4].y);
+    const p1_p4 = Math.hypot(eye[0].x - eye[3].x, eye[0].y - eye[3].y);
+    return (p2_p6 + p3_p5) / (2.0 * p1_p4);
+  };
+
   const isBlinking = (landmarks) => {
-    const computeEAR = (eye) => {
-      const p2_p6 = Math.hypot(eye[1].x - eye[5].x, eye[1].y - eye[5].y);
-      const p3_p5 = Math.hypot(eye[2].x - eye[4].x, eye[2].y - eye[4].y);
-      const p1_p4 = Math.hypot(eye[0].x - eye[3].x, eye[0].y - eye[3].y);
-      return (p2_p6 + p3_p5) / (2.0 * p1_p4);
-    };
-
     const leftEyeIndices = [33, 160, 158, 133, 153, 144];
     const rightEyeIndices = [362, 385, 387, 263, 373, 380];
 
@@ -37,9 +35,25 @@ export default function Home() {
     const earLeft = computeEAR(leftEye);
     const earRight = computeEAR(rightEye);
 
-    // Return true if EAR is below the threshold for either eye
     return earLeft < EAR_THRESHOLD || earRight < EAR_THRESHOLD;
   };
+
+  const handleBlink = useCallback((gazeX, gazeY) => {
+    if (!cooldownRef.current) {
+      const element = document.elementFromPoint(gazeX, gazeY);
+      if (element && element.dataset && element.dataset.value) {
+        setTypedText(prevText => prevText + element.dataset.value);
+      }
+
+      setCooldown(true);
+      cooldownRef.current = true;
+
+      // Reset cooldown after 1 second
+      setTimeout(() => {
+        cooldownRef.current = false;
+      }, 1000); // Adjust as needed
+    }
+  }, []);
 
   useEffect(() => {
     const videoElement = videoRef.current;
@@ -60,7 +74,6 @@ export default function Home() {
     });
 
     faceMesh.onResults((results) => {
-      // Draw the annotations (optional, for debugging)
       canvasCtx.save();
       canvasCtx.clearRect(0, 0, canvasElement.width, canvasElement.height);
       canvasCtx.drawImage(
@@ -99,24 +112,11 @@ export default function Home() {
         const smoothedY = alpha * screenY + (1 - alpha) * prevCursorPosition.current.y;
 
         setCursorPosition({ x: smoothedX, y: smoothedY });
-
         prevCursorPosition.current = { x: smoothedX, y: smoothedY };
 
         // Blink detection
-        if (isBlinking(landmarks) && !cooldown) {
-          setCooldown(true);
-
-          // Get the element at the gaze point
-          const element = document.elementFromPoint(smoothedX, smoothedY);
-
-          if (element && element.dataset && element.dataset.value) {
-            setTypedText((prevText) => prevText + element.dataset.value);
-          }
-
-          // Cooldown to prevent multiple detections
-          setTimeout(() => {
-            setCooldown(false);
-          }, 1000); // Adjust the cooldown duration as needed
+        if (isBlinking(landmarks)) {
+          handleBlink(smoothedX, smoothedY);
         }
       }
     });
@@ -131,7 +131,7 @@ export default function Home() {
       });
       camera.start();
     }
-  }, [cooldown]);
+  }, [handleBlink]);
 
   return (
     <div>
