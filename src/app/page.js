@@ -11,6 +11,8 @@ export default function Home() {
   const [cursorPosition, setCursorPosition] = useState({ x: 0, y: 0 });
   const [typedText, setTypedText] = useState('');
   const [cooldown, setCooldown] = useState(false);
+  const [isShiftActive, setIsShiftActive] = useState(false); // Shift state
+  const [hoveredKey, setHoveredKey] = useState(null); // For key hover effect
 
   const prevCursorPosition = useRef({ x: 0, y: 0 }); // For smoothing
   const cooldownRef = useRef(null); // Use a ref to track cooldown state
@@ -41,8 +43,25 @@ export default function Home() {
   const handleBlink = useCallback((gazeX, gazeY) => {
     if (!cooldownRef.current) {
       const element = document.elementFromPoint(gazeX, gazeY);
-      if (element && element.dataset && element.dataset.value) {
-        setTypedText(prevText => prevText + element.dataset.value);
+      
+      if (element && element.dataset) {
+        const value = element.dataset.value;
+        
+        if (value === "Backspace") {
+          // Remove last character
+          setTypedText(prev => prev.slice(0, -1));
+        } else if (value === "Shift") {
+          // Toggle Shift state
+          setIsShiftActive(prev => !prev);
+        } else if (value === "Space") {
+          // Add space to the typed text
+          setTypedText(prev => prev + ' ');
+        } else if (value) {
+          // Add letter, considering shift state
+          let letter = isShiftActive ? value.toUpperCase() : value.toLowerCase();
+          setTypedText(prev => prev + letter);
+          setIsShiftActive(false); // Turn off Shift after one use
+        }
       }
 
       setCooldown(true);
@@ -53,7 +72,7 @@ export default function Home() {
         cooldownRef.current = false;
       }, 1000); // Adjust as needed
     }
-  }, []);
+  }, [isShiftActive]);
 
   useEffect(() => {
     const videoElement = videoRef.current;
@@ -114,6 +133,14 @@ export default function Home() {
         setCursorPosition({ x: smoothedX, y: smoothedY });
         prevCursorPosition.current = { x: smoothedX, y: smoothedY };
 
+        // Hover effect logic: Track hovered key
+        const hoveredElement = document.elementFromPoint(smoothedX, smoothedY);
+        if (hoveredElement && hoveredElement.dataset && hoveredElement.dataset.value) {
+          setHoveredKey(hoveredElement.dataset.value);
+        } else {
+          setHoveredKey(null);
+        }
+
         // Blink detection
         if (isBlinking(landmarks)) {
           handleBlink(smoothedX, smoothedY);
@@ -134,7 +161,15 @@ export default function Home() {
   }, [handleBlink]);
 
   return (
-    <div>
+    <div
+      style={{
+        cursor: 'url("https://image.shutterstock.com/image-vector/cursor-hand-icon-pointer-vector-260nw-1144710749.jpg"), auto', // Custom cursor using CSS
+        height: '100vh', // Make the page fill the viewport
+        display: 'flex',
+        flexDirection: 'column',
+        justifyContent: 'space-between', // Align keyboard to the bottom
+      }}
+    >
       <video ref={videoRef} style={{ display: 'none' }} />
       <canvas
         ref={canvasRef}
@@ -146,60 +181,111 @@ export default function Home() {
         }}
       />
 
-      {/* Display the cursor */}
+      {/* Live Text Box at the top with blinking cursor */}
       <div
         style={{
-          position: 'absolute',
-          left: cursorPosition.x - 10,
-          top: cursorPosition.y - 10,
-          width: 20,
-          height: 20,
-          borderRadius: '50%',
-          backgroundColor: 'red',
-          pointerEvents: 'none',
-        }}
-      ></div>
-
-      {/* Display the typed text */}
-      <div
-        style={{
-          position: 'fixed',
-          top: 20,
-          left: 20,
+          position: 'relative',
+          top: '10px',
           fontSize: '24px',
           backgroundColor: 'white',
           padding: '10px',
+          width: '80%',
+          margin: '0 auto',
           borderRadius: '5px',
+          textAlign: 'left',
+          border: '1px solid black',
+          whiteSpace: 'nowrap',
+          overflow: 'hidden',
         }}
       >
         {typedText}
+        <span
+          style={{
+            display: 'inline-block',
+            width: '1ch',
+            backgroundColor: 'black',
+            marginLeft: '5px',
+            animation: 'blink 1s step-start infinite',
+          }}
+        >
+          &nbsp;
+        </span>
       </div>
 
-      {/* Display the letters */}
+      {/* Standard QWERTY keyboard with staggered rows */}
       <div
         style={{
           display: 'grid',
-          gridTemplateColumns: 'repeat(10, 1fr)',
+          gridTemplateColumns: 'repeat(14, 1fr)', // 14 columns for correct staggering
           gridGap: '10px',
-          marginTop: '100px',
-          textAlign: 'center',
+          maxWidth: '1200px',
+          margin: '0 auto', // Center the keyboard horizontally
+          marginBottom: '10px', // Bring the keyboard down
         }}
       >
-        {'ABCDEFGHIJKLMNOPQRSTUVWXYZ'.split('').map((letter) => (
-          <div
-            key={letter}
-            data-value={letter}
-            style={{
-              fontSize: '36px',
-              padding: '20px',
-              border: '1px solid black',
-              borderRadius: '5px',
-            }}
-          >
-            {letter}
+        {/* First Row */}
+        {'1234567890-='.split('').map((key) => (
+          <div key={key} data-value={key} style={getKeyStyle(hoveredKey, key)}>
+            {key}
           </div>
         ))}
+        <div data-value="Backspace" style={getKeyStyle(hoveredKey, 'Backspace')}>
+          Backspace
+        </div>
+
+        {/* Second Row */}
+        <div style={{ gridColumn: 'span 1' }}></div> {/* Empty space for stagger */}
+        {'QWERTYUIOP[]\\'.split('').map((key) => (
+          <div key={key} data-value={key} style={getKeyStyle(hoveredKey, key)}>
+            {key}
+          </div>
+        ))}
+
+        {/* Third Row */}
+        <div style={{ gridColumn: 'span 1' }}></div> {/* Empty space for stagger */}
+        <div data-value="Shift" style={getKeyStyle(hoveredKey, 'Shift')}>
+          Shift
+        </div>
+        {'ASDFGHJKL;'.split('').map((key) => (
+          <div key={key} data-value={key} style={getKeyStyle(hoveredKey, key)}>
+            {key}
+          </div>
+        ))}
+        <div data-value="\'" style={getKeyStyle(hoveredKey, '\'')}>'</div>
+
+        {/* Fourth Row */}
+        <div style={{ gridColumn: 'span 2' }}></div> {/* Empty space for stagger */}
+        {'ZXCVBNM,./'.split('').map((key) => (
+          <div key={key} data-value={key} style={getKeyStyle(hoveredKey, key)}>
+            {key}
+          </div>
+        ))}
+
+        {/* Space Bar */}
+        <div
+          data-value="Space"
+          style={{
+            ...getKeyStyle(hoveredKey, 'Space'),
+            gridColumn: 'span 14', // Spanning the entire width
+            textAlign: 'center',
+            fontSize: '28px', // Larger font size
+            padding: '20px', // Increase padding for larger key
+          }}
+        >
+          Space
+        </div>
       </div>
     </div>
   );
 }
+
+// Function to generate the key style and add hover effect
+const getKeyStyle = (hoveredKey, key) => ({
+  fontSize: '28px', // Larger font size
+  padding: '20px', // Larger padding for bigger keys
+  border: '1px solid black',
+  borderRadius: '5px',
+  backgroundColor: hoveredKey === key ? '#d3d3d3' : '#f0f0f0', // Darken key on hover
+  textAlign: 'center',
+  cursor: 'pointer',
+});

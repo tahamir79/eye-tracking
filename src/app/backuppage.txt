@@ -1,789 +1,294 @@
-"use client"; // Ensure this is a client component
+"use client"; // Ensure the component is treated as a Client Component
 
-import { useEffect, useRef, useState } from 'react';
-import { FaceMesh } from '@mediapipe/face_mesh';
-import { Camera } from '@mediapipe/camera_utils';
-
-export default function Home() {
-  const videoRef = useRef(null);
-  const dotRef = useRef(null);
-  const [status, setStatus] = useState('Please align your head in the center of the screen inside the oval.');
-  const [calibrationStage, setCalibrationStage] = useState(0); // Track calibration stage (0 to 4)
-  const [headAligned, setHeadAligned] = useState(false); // To detect if the head is aligned
-  const calibrationData = useRef({ topLeft: null, topRight: null, bottomLeft: null, bottomRight: null });
-  const [calibrationComplete, setCalibrationComplete] = useState(false);
-  const [calibrating, setCalibrating] = useState(false); // Check if calibration is in progress
-
-  const [faceMesh, setFaceMesh] = useState(null);
-
-  // Initialize MediaPipe Face Mesh and setup the webcam feed
-  useEffect(() => {
-    if (typeof window !== 'undefined') {
-      // Ensure this only runs on the client side
-      const initializeFaceMesh = async () => {
-        const faceMesh = new FaceMesh({
-          locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh/${file}`,
-        });
-
-        faceMesh.setOptions({
-          maxNumFaces: 1,
-          refineLandmarks: true, // For tracking iris and eye movement
-          minDetectionConfidence: 0.5,
-          minTrackingConfidence: 0.5,
-        });
-
-        try {
-          await faceMesh.initialize(); // Initialize face mesh properly
-          console.log("Face Mesh Initialized");
-        } catch (error) {
-          console.error("Failed to initialize Face Mesh:", error);
-        }
-
-        faceMesh.onResults(onResults);
-        setFaceMesh(faceMesh);
-
-        const videoElement = videoRef.current;
-
-        const camera = new Camera(videoElement, {
-          onFrame: async () => {
-            await faceMesh.send({ image: videoElement });
-          },
-          width: 640,
-          height: 480,
-        });
-        camera.start();
-      };
-
-      initializeFaceMesh();
-    }
-  }, []);
-
-  // Start the calibration process
-  const startCalibration = () => {
-    if (!calibrating) {
-      setStatus('Look at the top-left corner to begin calibration.');
-      setCalibrating(true);
-      setCalibrationStage(0); // Start with the first calibration stage
-    }
-  };
-
-  // Handle each stage of the calibration process
-  const handleCalibrationStage = (leftIris, rightIris) => {
-    const eyeCenterX = (leftIris.x + rightIris.x) / 2;
-    const eyeCenterY = (leftIris.y + rightIris.y) / 2;
-
-    switch (calibrationStage) {
-      case 0:
-        calibrationData.current.topLeft = { x: eyeCenterX, y: eyeCenterY };
-        setStatus('Now look at the top-right corner.');
-        console.log('Top-left calibrated:', calibrationData.current.topLeft);
-        setCalibrationStage(1);
-        break;
-      case 1:
-        calibrationData.current.topRight = { x: eyeCenterX, y: eyeCenterY };
-        setStatus('Now look at the bottom-left corner.');
-        console.log('Top-right calibrated:', calibrationData.current.topRight);
-        setCalibrationStage(2);
-        break;
-      case 2:
-        calibrationData.current.bottomLeft = { x: eyeCenterX, y: eyeCenterY };
-        setStatus('Now look at the bottom-right corner.');
-        console.log('Bottom-left calibrated:', calibrationData.current.bottomLeft);
-        setCalibrationStage(3);
-        break;
-      case 3:
-        calibrationData.current.bottomRight = { x: eyeCenterX, y: eyeCenterY };
-        setStatus('Calibration successfully done! Now tracking gaze.');
-        console.log('Bottom-right calibrated:', calibrationData.current.bottomRight);
-        setCalibrationComplete(true);
-        break;
-      default:
-        break;
-    }
-  };
-
-  // Check if the head is aligned (we'll simulate with a simple flag for now)
-  const checkHeadAlignment = (leftIris, rightIris) => {
-    const centerX = (leftIris.x + rightIris.x) / 2;
-    const centerY = (leftIris.y + rightIris.y) / 2;
-
-    // Check if the center is within the "oval" area (simulated here with approximate conditions)
-    const aligned = centerX > 0.4 && centerX < 0.6 && centerY > 0.3 && centerY < 0.7;
-
-    if (aligned && !headAligned) {
-      setHeadAligned(true);
-      setStatus('Head aligned! Starting the calibration...');
-      startCalibration(); // Automatically trigger calibration
-    } else if (!aligned && headAligned) {
-      setHeadAligned(false);
-      setStatus('Please align your head in the center of the screen inside the oval.');
-    }
-  };
-
-  // Function to calculate the gaze after calibration
-  const calculateGazeUsingCalibration = (leftIris, rightIris) => {
-    const cameraWidth = videoRef.current.videoWidth;
-    const cameraHeight = videoRef.current.videoHeight;
-    const screenWidth = window.innerWidth;
-    const screenHeight = window.innerHeight;
-
-    // Get the center of the irises
-    const leftIrisX = leftIris.x * cameraWidth;
-    const leftIrisY = leftIris.y * cameraHeight;
-    const rightIrisX = rightIris.x * cameraWidth;
-    const rightIrisY = rightIris.y * cameraHeight;
-
-    // Calculate the center point between both irises
-    const eyeCenterX = (leftIrisX + rightIrisX) / 2;
-    const eyeCenterY = (leftIrisY + rightIrisY) / 2;
-
-    // Calculate the normalized position within the calibrated region
-    const { topLeft, topRight, bottomLeft, bottomRight } = calibrationData.current;
-
-    // Use linear interpolation to map the eye position to screen coordinates based on calibration points
-    const normalizedX = (eyeCenterX - topLeft.x) / (topRight.x - topLeft.x);
-    const normalizedY = (eyeCenterY - topLeft.y) / (bottomLeft.y - topLeft.y);
-
-    // Convert normalized coordinates into screen coordinates
-    const gazeX = normalizedX * screenWidth;
-    const gazeY = normalizedY * screenHeight;
-
-    return { x: gazeX, y: gazeY };
-  };
-
-  // Handle the calibration and head alignment checks
-  const onResults = (results) => {
-    if (results.multiFaceLandmarks && results.multiFaceLandmarks.length > 0) {
-      const landmarks = results.multiFaceLandmarks[0];
-      const leftIris = landmarks[468]; // Left iris center
-      const rightIris = landmarks[473]; // Right iris center
-
-      // Check if the head is aligned before starting calibration
-      if (!calibrationComplete && !calibrating) {
-        checkHeadAlignment(leftIris, rightIris);
-      }
-
-      // Handle calibration process
-      if (calibrating && !calibrationComplete) {
-        handleCalibrationStage(leftIris, rightIris);
-      }
-
-      // Handle gaze tracking once calibration is complete
-      if (calibrationComplete) {
-        const gaze = calculateGazeUsingCalibration(leftIris, rightIris);
-        const dotElement = dotRef.current;
-        dotElement.style.left = `${gaze.x}px`;
-        dotElement.style.top = `${gaze.y}px`;
-      }
-    }
-  };
-
-  return (
-    <div style={fullScreenContainerStyle}>
-      <video ref={videoRef} style={mirroredVideoStyle} />
-
-      {/* Oval alignment guide */}
-      {!calibrationComplete && (
-        <div style={headAlignmentOverlayStyle}>
-          <div style={headAlignmentGuideStyle(headAligned)} />
-          <p style={alignTextStyle}>{status}</p>
-        </div>
-      )}
-
-      {/* Gaze tracking red dot */}
-      <div
-        ref={dotRef}
-        style={{
-          position: 'absolute',
-          width: '10px',
-          height: '10px',
-          borderRadius: '50%',
-          backgroundColor: 'red',
-          pointerEvents: 'none',
-        }}
-      />
-    </div>
-  );
-}
-
-// Mirrored video feed style
-const mirroredVideoStyle = {
-  display: 'block',
-  width: '100%',
-  height: '100vh',
-  objectFit: 'cover',
-  transform: 'scaleX(-1)', // Mirror the video horizontally
-  position: 'absolute',
-  top: 0,
-  left: 0,
-};
-
-// Full screen container for video and overlays
-const fullScreenContainerStyle = {
-  position: 'relative',
-  width: '100vw',
-  height: '100vh',
-  overflow: 'hidden',
-};
-
-// Head alignment guide (oval) style with dynamic color based on alignment
-const headAlignmentGuideStyle = (isAligned) => ({
-  position: 'absolute',
-  top: '50%',
-  left: '50%',
-  width: '200px',
-  height: '300px',
-  marginLeft: '-100px',
-  marginTop: '-150px',
-  border: `5px solid ${isAligned ? 'green' : 'white'}`, // Change to green when aligned
-  borderRadius: '50% / 60%', // Oval shape
-  zIndex: 1001,
-  display: 'flex',
-  justifyContent: 'center',
-  alignItems: 'center',
-});
-
-// Overlay around the oval (simplified version without transparency)
-const headAlignmentOverlayStyle = {
-  position: 'absolute',
-  top: 0,
-  left: 0,
-  width: '100%',
-  height: '100%',
-  zIndex: 1000,
-};
-
-// Text for alignment instructions
-const alignTextStyle = {
-  color: 'white',
-  fontSize: '18px',
-  textAlign: 'center',
-  position: 'absolute',
-  top: 'calc(50% + 180px)', // Adjust below the oval
-  left: '50%',
-  transform: 'translateX(-50%)',
-};
-
-
-
-//
-"use client"; // Ensure this is a client component
-
-import { useEffect, useRef, useState } from 'react';
-import { FaceMesh } from '@mediapipe/face_mesh';
-import { Camera } from '@mediapipe/camera_utils';
-
-export default function Home() {
-  const videoRef = useRef(null);
-  const gazePointerRef = useRef(null); // Pointer for gaze tracking
-  const [status, setStatus] = useState('Please align your head in the center of the screen inside the oval.');
-  const [calibrationStage, setCalibrationStage] = useState(0); // Track calibration stage (0 to 4)
-  const [headAligned, setHeadAligned] = useState(false); // To detect if the head is aligned
-  const calibrationData = useRef({ topLeft: null, topRight: null, bottomLeft: null, bottomRight: null });
-  const [calibrationComplete, setCalibrationComplete] = useState(false);
-  const [calibrating, setCalibrating] = useState(false); // Check if calibration is in progress
-  const [faceMesh, setFaceMesh] = useState(null);
-  const [faceMeshResults, setFaceMeshResults] = useState(null); // Hold the face mesh results
-
-  // Initialize MediaPipe Face Mesh and setup the webcam feed
-  useEffect(() => {
-    if (typeof window !== 'undefined' && !faceMesh) { // Avoid re-initializing
-      const initializeFaceMesh = async () => {
-        const faceMeshInstance = new FaceMesh({
-          locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh/${file}`,
-        });
-
-        faceMeshInstance.setOptions({
-          maxNumFaces: 1,
-          refineLandmarks: true, // For tracking iris and eye movement
-          minDetectionConfidence: 0.5,
-          minTrackingConfidence: 0.5,
-        });
-
-        try {
-          await faceMeshInstance.initialize(); // Initialize face mesh properly
-          console.log("Face Mesh Initialized");
-        } catch (error) {
-          console.error("Failed to initialize Face Mesh:", error);
-        }
-
-        faceMeshInstance.onResults(onResults);
-        setFaceMesh(faceMeshInstance);
-
-        const videoElement = videoRef.current;
-        const camera = new Camera(videoElement, {
-          onFrame: async () => {
-            await faceMeshInstance.send({ image: videoElement });
-          },
-          width: 640,
-          height: 480,
-        });
-        camera.start();
-      };
-
-      initializeFaceMesh();
-    }
-  }, [faceMesh]);
-
-  // Start the calibration process
-  const startCalibration = () => {
-    if (!calibrating) {
-      setStatus('Look at the top-left corner to begin calibration.');
-      setCalibrating(true);
-      setCalibrationStage(0); // Start with the first calibration stage
-      proceedWithCalibration(0); // Begin the automated calibration process
-    }
-  };
-
-  // Proceed with the calibration process (automatically move through each corner)
-  const proceedWithCalibration = (stage) => {
-    const delay = 3000; // 3 seconds delay between each stage
-    const stages = [
-      { corner: 'top-left', key: 'topLeft' },
-      { corner: 'top-right', key: 'topRight' },
-      { corner: 'bottom-right', key: 'bottomRight' },
-      { corner: 'bottom-left', key: 'bottomLeft' },
-    ];
-
-    if (stage < stages.length) {
-      const { corner, key } = stages[stage];
-
-      // Capture the current eye position after the delay and then update the status
-      setTimeout(() => {
-        setStatus(`Look at the ${corner} corner.`);
-        captureEyePosition(key);
-        setCalibrationStage(stage + 1); // Update stage
-        proceedWithCalibration(stage + 1);
-      }, delay);
-    } else {
-      // Calibration is complete
-      setStatus('Calibration successfully done! Now tracking your gaze.');
-      setCalibrationComplete(true);
-    }
-  };
-
-  // Capture the current eye position based on the calibration stage
-  const captureEyePosition = (key) => {
-    if (!faceMeshResults || !faceMeshResults.multiFaceLandmarks) return;
-
-    const captureData = faceMeshResults.multiFaceLandmarks[0]; // Assuming single face
-    const leftIris = captureData[468]; // Left iris center
-    const rightIris = captureData[473]; // Right iris center
-
-    const eyeCenterX = (leftIris.x + rightIris.x) / 2;
-    const eyeCenterY = (leftIris.y + rightIris.y) / 2;
-
-    // Save the captured data for the current corner
-    calibrationData.current[key] = { x: eyeCenterX, y: eyeCenterY };
-    console.log(`${key} calibrated:`, calibrationData.current[key]);
-  };
-
-  // Check if the head is aligned
-  const checkHeadAlignment = (leftIris, rightIris) => {
-    const centerX = (leftIris.x + rightIris.x) / 2;
-    const centerY = (leftIris.y + rightIris.y) / 2;
-
-    const aligned = centerX > 0.4 && centerX < 0.6 && centerY > 0.3 && centerY < 0.7;
-
-    if (aligned && !headAligned) {
-      setHeadAligned(true);
-      setStatus('Head aligned! Starting the calibration...');
-      startCalibration(); // Automatically trigger calibration
-    } else if (!aligned && headAligned) {
-      setHeadAligned(false);
-      setStatus('Please align your head in the center of the screen inside the oval.');
-    }
-  };
-
-  // Function to calculate the gaze after calibration
-  const calculateGazeUsingCalibration = (leftIris, rightIris) => {
-    const cameraWidth = videoRef.current.videoWidth;
-    const cameraHeight = videoRef.current.videoHeight;
-    const screenWidth = window.innerWidth;
-    const screenHeight = window.innerHeight;
-
-    // Get the center of the irises
-    const leftIrisX = leftIris.x * cameraWidth;
-    const leftIrisY = leftIris.y * cameraHeight;
-    const rightIrisX = rightIris.x * cameraWidth;
-    const rightIrisY = rightIris.y * cameraHeight;
-
-    // Calculate the center point between both irises
-    const eyeCenterX = (leftIrisX + rightIrisX) / 2;
-    const eyeCenterY = (leftIrisY + rightIrisY) / 2;
-
-    // Calculate the normalized position within the calibrated region
-    const { topLeft, topRight, bottomLeft, bottomRight } = calibrationData.current;
-
-    // Use linear interpolation to map the eye position to screen coordinates based on calibration points
-    const normalizedX = (eyeCenterX - topLeft.x) / (topRight.x - topLeft.x);
-    const normalizedY = (eyeCenterY - topLeft.y) / (bottomLeft.y - topLeft.y);
-
-    // Convert normalized coordinates into screen coordinates
-    const gazeX = normalizedX * screenWidth;
-    const gazeY = normalizedY * screenHeight;
-
-    return { x: gazeX, y: gazeY };
-  };
-
-  // Handle the calibration and head alignment checks
-  const onResults = (results) => {
-    if (results.multiFaceLandmarks && results.multiFaceLandmarks.length > 0) {
-      setFaceMeshResults(results); // Store the results for later use
-      const landmarks = results.multiFaceLandmarks[0];
-      const leftIris = landmarks[468]; // Left iris center
-      const rightIris = landmarks[473]; // Right iris center
-
-      // Check if the head is aligned before starting calibration
-      if (!calibrationComplete && !calibrating) {
-        checkHeadAlignment(leftIris, rightIris);
-      }
-
-      // Handle gaze tracking once calibration is complete
-      if (calibrationComplete) {
-        const gaze = calculateGazeUsingCalibration(leftIris, rightIris);
-        const gazePointer = gazePointerRef.current;
-        if (gazePointer) {
-          gazePointer.style.left = `${gaze.x}px`;
-          gazePointer.style.top = `${gaze.y}px`;
-        }
-      }
-    }
-  };
-
-  return (
-    <div style={fullScreenContainerStyle}>
-      <video ref={videoRef} style={mirroredVideoStyle} />
-
-      {/* Oval alignment guide */}
-      {!calibrationComplete && (
-        <div style={headAlignmentOverlayStyle}>
-          <div style={headAlignmentGuideStyle(headAligned)} />
-          <p style={alignTextStyle}>{status}</p>
-        </div>
-      )}
-
-      {/* Gaze tracking pointer */}
-      {calibrationComplete && (
-        <div
-          ref={gazePointerRef}
-          style={{
-            position: 'absolute',
-            width: '20px',
-            height: '20px',
-            borderRadius: '50%',
-            backgroundColor: 'blue',
-            pointerEvents: 'none',
-            zIndex: 2000,
-          }}
-        />
-      )}
-
-      {/* Red dots for the four corners */}
-      <div style={redDotStyle('top-left')} />
-      <div style={redDotStyle('top-right')} />
-      <div style={redDotStyle('bottom-right')} />
-      <div style={redDotStyle('bottom-left')} />
-    </div>
-  );
-}
-
-// Function to return the red dot style for the four corners
-const redDotStyle = (position) => {
-  const baseStyle = {
-    position: 'absolute',
-    width: '10px',
-    height: '10px',
-    borderRadius: '50%',
-    backgroundColor: 'red',
-    pointerEvents: 'none',
-  };
-
-  switch (position) {
-    case 'top-left':
-      return { ...baseStyle, left: '10px', top: '10px' };
-    case 'top-right':
-      return { ...baseStyle, right: '10px', top: '10px' };
-    case 'bottom-right':
-      return { ...baseStyle, right: '10px', bottom: '10px' };
-    case 'bottom-left':
-      return { ...baseStyle, left: '10px', bottom: '10px' };
-    default:
-      return baseStyle;
-  }
-};
-
-// Mirrored video feed style
-const mirroredVideoStyle = {
-  display: 'block',
-  width: '100%',
-  height: '100vh',
-  objectFit: 'cover',
-  transform: 'scaleX(-1)', // Mirror the video horizontally
-  position: 'absolute',
-  top: 0,
-  left: 0,
-};
-
-// Full screen container for video and overlays
-const fullScreenContainerStyle = {
-  position: 'relative',
-  width: '100vw',
-  height: '100vh',
-  overflow: 'hidden',
-};
-
-// Head alignment guide (oval) style with dynamic color based on alignment
-const headAlignmentGuideStyle = (isAligned) => ({
-  position: 'absolute',
-  top: '50%',
-  left: '50%',
-  width: '200px',
-  height: '300px',
-  marginLeft: '-100px',
-  marginTop: '-150px',
-  border: `5px solid ${isAligned ? 'green' : 'white'}`, // Change to green when aligned
-  borderRadius: '50% / 60%', // Oval shape
-  zIndex: 1001,
-  display: 'flex',
-  justifyContent: 'center',
-  alignItems: 'center',
-});
-
-// Overlay around the oval
-const headAlignmentOverlayStyle = {
-  position: 'absolute',
-  top: 0,
-  left: 0,
-  width: '100%',
-  height: '100%',
-  zIndex: 1000,
-};
-
-// Text for alignment instructions
-const alignTextStyle = {
-  color: 'white',
-  fontSize: '18px',
-  textAlign: 'center',
-  position: 'absolute',
-  top: 'calc(50% + 180px)', // Adjust below the oval
-  left: '50%',
-  transform: 'translateX(-50%)',
-};
-
-
-
-
-####model works but is still not sensetive enough
-
-
-"use client"; // This ensures the component is treated as a Client Component
-
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, useCallback } from 'react';
 import { FaceMesh } from '@mediapipe/face_mesh';
 import { Camera } from '@mediapipe/camera_utils';
 
 export default function Home() {
   const videoRef = useRef(null);
   const canvasRef = useRef(null);
-  const dotRef = useRef(null);
-  const [status, setStatus] = useState('Loading model...');
-  const [text, setText] = useState(""); // The text box content
-  const [pointerPosition, setPointerPosition] = useState({ x: 0, y: 0 }); // Track pointer position
-  const [blinkCooldown, setBlinkCooldown] = useState(false); // Cooldown to prevent multiple clicks
-  const [isClient, setIsClient] = useState(false); // To check if we are in the client-side
 
-  useEffect(() => {
-    // This ensures that the code only runs in the client-side
-    setIsClient(typeof window !== 'undefined' && typeof navigator !== 'undefined');
-  }, []);
+  const [cursorPosition, setCursorPosition] = useState({ x: 0, y: 0 });
+  const [typedText, setTypedText] = useState('');
+  const [cooldown, setCooldown] = useState(false);
+  const [isShiftActive, setIsShiftActive] = useState(false); // Shift state
+  const [hoveredKey, setHoveredKey] = useState(null); // For key hover effect
 
-  useEffect(() => {
-    // Only run the webcam setup and FaceMesh initialization on the client-side
-    if (isClient) {
-      const initializeFaceMesh = async () => {
-        const faceMesh = new FaceMesh({
-          locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh/${file}`,
-        });
+  const prevCursorPosition = useRef({ x: 0, y: 0 }); // For smoothing
+  const cooldownRef = useRef(null); // Use a ref to track cooldown state
 
-        faceMesh.setOptions({
-          maxNumFaces: 1,
-          refineLandmarks: true, // Enable iris tracking for better eye tracking
-          minDetectionConfidence: 0.5,
-          minTrackingConfidence: 0.5,
-        });
+  const EAR_THRESHOLD = 0.25; // Adjust this value if needed
 
-        faceMesh.onResults(onResults);
-
-        const videoElement = videoRef.current;
-        const camera = new Camera(videoElement, {
-          onFrame: async () => {
-            await faceMesh.send({ image: videoElement });
-          },
-          width: 640,
-          height: 480,
-        });
-        camera.start();
-
-        setStatus('Model loaded and webcam is active!');
-      };
-
-      initializeFaceMesh();
-    }
-  }, [isClient]); // This effect depends on the client-side check
-
-  // Blink detection logic based on Eye Aspect Ratio (EAR)
-  const isBlinking = (landmarks) => {
-    const leftEye = landmarks.slice(33, 42);
-    const rightEye = landmarks.slice(362, 371);
-
-    // Calculate the vertical and horizontal distances of the eyes
-    const verticalLeft = Math.sqrt(
-      Math.pow(leftEye[1].x - leftEye[5].x, 2) + Math.pow(leftEye[1].y - leftEye[5].y, 2)
-    );
-    const horizontalLeft = Math.sqrt(
-      Math.pow(leftEye[0].x - leftEye[3].x, 2) + Math.pow(leftEye[0].y - leftEye[3].y, 2)
-    );
-
-    const verticalRight = Math.sqrt(
-      Math.pow(rightEye[1].x - rightEye[5].x, 2) + Math.pow(rightEye[1].y - rightEye[5].y, 2)
-    );
-    const horizontalRight = Math.sqrt(
-      Math.pow(rightEye[0].x - rightEye[3].x, 2) + Math.pow(rightEye[0].y - rightEye[3].y, 2)
-    );
-
-    const earLeft = verticalLeft / horizontalLeft;
-    const earRight = verticalRight / horizontalRight;
-
-    const EAR_THRESHOLD = 0.2; // Blinking threshold
-    return earLeft < EAR_THRESHOLD && earRight < EAR_THRESHOLD;
+  // Compute Eye Aspect Ratio (EAR) to detect blinks
+  const computeEAR = (eye) => {
+    const p2_p6 = Math.hypot(eye[1].x - eye[5].x, eye[1].y - eye[5].y);
+    const p3_p5 = Math.hypot(eye[2].x - eye[4].x, eye[2].y - eye[4].y);
+    const p1_p4 = Math.hypot(eye[0].x - eye[3].x, eye[0].y - eye[3].y);
+    return (p2_p6 + p3_p5) / (2.0 * p1_p4);
   };
 
-  // Handle the results of the face mesh model
-  const onResults = (results) => {
+  const isBlinking = (landmarks) => {
+    const leftEyeIndices = [33, 160, 158, 133, 153, 144];
+    const rightEyeIndices = [362, 385, 387, 263, 373, 380];
+
+    const leftEye = leftEyeIndices.map(index => landmarks[index]);
+    const rightEye = rightEyeIndices.map(index => landmarks[index]);
+
+    const earLeft = computeEAR(leftEye);
+    const earRight = computeEAR(rightEye);
+
+    return earLeft < EAR_THRESHOLD || earRight < EAR_THRESHOLD;
+  };
+
+  const handleBlink = useCallback((gazeX, gazeY) => {
+    if (!cooldownRef.current) {
+      const element = document.elementFromPoint(gazeX, gazeY);
+      
+      if (element && element.dataset) {
+        const value = element.dataset.value;
+        
+        if (value === "Backspace") {
+          // Remove last character
+          setTypedText(prev => prev.slice(0, -1));
+        } else if (value === "Shift") {
+          // Toggle Shift state
+          setIsShiftActive(prev => !prev);
+        } else if (value === "Space") {
+          // Add space to the typed text
+          setTypedText(prev => prev + ' ');
+        } else if (value) {
+          // Add letter, considering shift state
+          let letter = isShiftActive ? value.toUpperCase() : value.toLowerCase();
+          setTypedText(prev => prev + letter);
+          setIsShiftActive(false); // Turn off Shift after one use
+        }
+      }
+
+      setCooldown(true);
+      cooldownRef.current = true;
+
+      // Reset cooldown after 1 second
+      setTimeout(() => {
+        cooldownRef.current = false;
+      }, 1000); // Adjust as needed
+    }
+  }, [isShiftActive]);
+
+  useEffect(() => {
+    const videoElement = videoRef.current;
     const canvasElement = canvasRef.current;
     const canvasCtx = canvasElement.getContext('2d');
 
-    canvasElement.width = results.image.width;
-    canvasElement.height = results.image.height;
+    const faceMesh = new FaceMesh({
+      locateFile: (file) => {
+        return `https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh/${file}`;
+      },
+    });
 
-    canvasCtx.save();
-    canvasCtx.clearRect(0, 0, canvasElement.width, canvasElement.height);
-    canvasCtx.drawImage(results.image, 0, 0, canvasElement.width, canvasElement.height);
+    faceMesh.setOptions({
+      maxNumFaces: 1,
+      refineLandmarks: true,
+      minDetectionConfidence: 0.5,
+      minTrackingConfidence: 0.5,
+    });
 
-    if (results.multiFaceLandmarks && results.multiFaceLandmarks.length > 0) {
-      const landmarks = results.multiFaceLandmarks[0];
+    faceMesh.onResults((results) => {
+      canvasCtx.save();
+      canvasCtx.clearRect(0, 0, canvasElement.width, canvasElement.height);
+      canvasCtx.drawImage(
+        results.image,
+        0,
+        0,
+        canvasElement.width,
+        canvasElement.height
+      );
+      canvasCtx.restore();
 
-      // Get the iris landmarks
-      const leftIris = landmarks[468]; // Left iris center
-      const rightIris = landmarks[473]; // Right iris center
+      if (results.multiFaceLandmarks && results.multiFaceLandmarks.length > 0) {
+        const landmarks = results.multiFaceLandmarks[0];
 
-      // Detect blink
-      const blinking = isBlinking(landmarks);
+        // Calculate gaze direction
+        const leftEyeCenter = {
+          x: (landmarks[33].x + landmarks[133].x) / 2,
+          y: (landmarks[33].y + landmarks[133].y) / 2,
+        };
+        const rightEyeCenter = {
+          x: (landmarks[362].x + landmarks[263].x) / 2,
+          y: (landmarks[362].y + landmarks[263].y) / 2,
+        };
+        const gazePoint = {
+          x: (leftEyeCenter.x + rightEyeCenter.x) / 2,
+          y: (leftEyeCenter.y + rightEyeCenter.y) / 2,
+        };
 
-      // Calculate the gaze point based on iris position (simplified, see previous implementation for full trigonometry)
-      const screenWidth = window.innerWidth;
-      const screenHeight = window.innerHeight;
-      const eyeCenterX = (leftIris.x + rightIris.x) / 2;
-      const eyeCenterY = (leftIris.y + rightIris.y) / 2;
+        // Map gaze point to screen coordinates with x-axis reversed
+        const screenX = (1 - gazePoint.x) * window.innerWidth;
+        const screenY = gazePoint.y * window.innerHeight;
 
-      // Adjust the sensitivity factor to increase the scale of movement
-      const sensitivityFactor = 4.0; // Increase this to make the movement more pronounced
+        // Smooth the cursor movement
+        const alpha = 0.2; // Smoothing factor between 0 and 1
+        const smoothedX = alpha * screenX + (1 - alpha) * prevCursorPosition.current.x;
+        const smoothedY = alpha * screenY + (1 - alpha) * prevCursorPosition.current.y;
 
-      // Reverse X-axis to correct for mirroring and scale the movement
-      const gazeX = screenWidth / 2 - (eyeCenterX - 0.5) * screenWidth * sensitivityFactor;
-      const gazeY = screenHeight / 2 + (eyeCenterY - 0.5) * screenHeight * sensitivityFactor;
+        setCursorPosition({ x: smoothedX, y: smoothedY });
+        prevCursorPosition.current = { x: smoothedX, y: smoothedY };
 
-      // Move the red dot (pointer)
-      setPointerPosition({ x: gazeX, y: gazeY });
+        // Hover effect logic: Track hovered key
+        const hoveredElement = document.elementFromPoint(smoothedX, smoothedY);
+        if (hoveredElement && hoveredElement.dataset && hoveredElement.dataset.value) {
+          setHoveredKey(hoveredElement.dataset.value);
+        } else {
+          setHoveredKey(null);
+        }
 
-      // Check if the pointer is over a key and blink is detected
-      if (blinking && !blinkCooldown) {
-        checkKeyPress(gazeX, gazeY);
+        // Blink detection
+        if (isBlinking(landmarks)) {
+          handleBlink(smoothedX, smoothedY);
+        }
       }
+    });
+
+    if (typeof window !== 'undefined') {
+      const camera = new Camera(videoElement, {
+        onFrame: async () => {
+          await faceMesh.send({ image: videoElement });
+        },
+        width: 640,
+        height: 480,
+      });
+      camera.start();
     }
-    canvasCtx.restore();
-  };
-
-  // Check if the pointer is over a key and blink detected
-  const checkKeyPress = (x, y) => {
-    const keyElements = document.elementsFromPoint(x, y);
-    const key = keyElements.find((el) => el.classList.contains('key'));
-
-    if (key) {
-      const char = key.innerText;
-      setText((prev) => prev + (char === "Space" ? " " : char)); // Add the character to the text box
-
-      // Prevent multiple key presses due to rapid blinks
-      setBlinkCooldown(true);
-      setTimeout(() => setBlinkCooldown(false), 1000); // Cooldown for 1 second
-    }
-  };
+  }, [handleBlink]);
 
   return (
-    <div>
-      <h1>Gaze Tracker with Virtual Keyboard</h1>
-      <p>{status}</p>
-
-      {/* Text box to display the typed text */}
-      <textarea
-        value={text}
-        readOnly
+    <div
+      style={{
+        cursor: 'url("https://image.shutterstock.com/image-vector/cursor-hand-icon-pointer-vector-260nw-1144710749.jpg"), auto', // Custom cursor using CSS
+        height: '100vh', // Make the page fill the viewport
+        display: 'flex',
+        flexDirection: 'column',
+        justifyContent: 'flex-end', // Align keyboard to the bottom
+      }}
+    >
+      <video ref={videoRef} style={{ display: 'none' }} />
+      <canvas
+        ref={canvasRef}
         style={{
+          display: 'none', // Set to 'block' if you want to see the canvas
+          position: 'absolute',
           width: '100%',
-          height: '100px',
-          fontSize: '24px',
-          marginBottom: '20px',
-          textAlign: 'center',
+          height: '100%',
         }}
       />
 
-      {/* Virtual Keyboard */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(10, 1fr)', gap: '10px' }}>
-        {['Q', 'W', 'E', 'R', 'T', 'Y', 'U', 'I', 'O', 'P'].map((key) => (
-          <button key={key} className="key" style={keyboardButtonStyle}>
-            {key}
-          </button>
-        ))}
-        {['A', 'S', 'D', 'F', 'G', 'H', 'J', 'K', 'L'].map((key) => (
-          <button key={key} className="key" style={keyboardButtonStyle}>
-            {key}
-          </button>
-        ))}
-        {['Z', 'X', 'C', 'V', 'B', 'N', 'M'].map((key) => (
-          <button key={key} className="key" style={keyboardButtonStyle}>
-            {key}
-          </button>
-        ))}
-        <button className="key" style={keyboardButtonStyle}>
-          Space
-        </button>
+      {/* Live Text Box at the top with blinking cursor */}
+      <div
+        style={{
+          position: 'relative',
+          top: '10px',
+          fontSize: '24px',
+          backgroundColor: 'white',
+          padding: '10px',
+          width: '90%', // Increase width for text box
+          margin: '0 auto',
+          borderRadius: '5px',
+          textAlign: 'left',
+          border: '1px solid black',
+          whiteSpace: 'nowrap',
+          overflow: 'hidden',
+        }}
+      >
+        {typedText}
+        <span
+          style={{
+            display: 'inline-block',
+            width: '1ch',
+            backgroundColor: 'black',
+            marginLeft: '5px',
+            animation: 'blink 1s step-start infinite',
+          }}
+        >
+          &nbsp;
+        </span>
       </div>
 
-      {/* Pointer */}
+      {/* Standard QWERTY keyboard with staggered rows */}
       <div
-        ref={dotRef}
         style={{
-          position: 'absolute',
-          width: '20px',
-          height: '20px',
-          borderRadius: '50%',
-          backgroundColor: 'red',
-          left: `${pointerPosition.x}px`,
-          top: `${pointerPosition.y}px`,
-          pointerEvents: 'none',
+          display: 'grid',
+          gridTemplateColumns: 'repeat(15, 1fr)', // 15 columns for a wider keyboard
+          gridGap: '10px',
+          maxWidth: '1400px', // Increased max width for keyboard
+          margin: '0 auto', // Center the keyboard horizontally
+          marginBottom: '10px', // Keep keyboard near the bottom
         }}
-      />
+      >
+        {/* First Row */}
+        {'1234567890-='.split('').map((key) => (
+          <div key={key} data-value={key} style={getKeyStyle(hoveredKey, key)}>
+            {key}
+          </div>
+        ))}
+        <div data-value="Backspace" style={getKeyStyle(hoveredKey, 'Backspace')}>
+          Backspace
+        </div>
 
-      <video ref={videoRef} style={{ display: 'none' }} />
-      <canvas ref={canvasRef} style={{ display: 'none' }} />
+        {/* Second Row */}
+        <div style={{ gridColumn: 'span 1' }}></div> {/* Empty space for stagger */}
+        {'QWERTYUIOP[]\\'.split('').map((key) => (
+          <div key={key} data-value={key} style={getKeyStyle(hoveredKey, key)}>
+            {key}
+          </div>
+        ))}
+
+        {/* Third Row */}
+        <div style={{ gridColumn: 'span 2' }}></div> {/* Empty space for stagger */}
+        <div data-value="Shift" style={getKeyStyle(hoveredKey, 'Shift')}>
+          Shift
+        </div>
+        {'ASDFGHJKL;'.split('').map((key) => (
+          <div key={key} data-value={key} style={getKeyStyle(hoveredKey, key)}>
+            {key}
+          </div>
+        ))}
+        <div data-value="\'" style={getKeyStyle(hoveredKey, '\'')}>'</div>
+
+        {/* Fourth Row */}
+        <div style={{ gridColumn: 'span 2' }}></div> {/* Empty space for stagger */}
+        <div data-value="Shift" style={getKeyStyle(hoveredKey, 'Shift')}>
+          Shift
+        </div>
+        {'ZXCVBNM,./'.split('').map((key) => (
+          <div key={key} data-value={key} style={getKeyStyle(hoveredKey, key)}>
+            {key}
+          </div>
+        ))}
+
+        {/* Space Bar */}
+        <div
+          data-value="Space"
+          style={{
+            ...getKeyStyle(hoveredKey, 'Space'),
+            gridColumn: 'span 15', // Spanning the entire width
+            textAlign: 'center',
+            fontSize: '28px', // Larger font size
+            padding: '20px', // Increase padding for larger key
+          }}
+        >
+          Space
+        </div>
+      </div>
     </div>
   );
 }
 
-// Style for the keyboard buttons
-const keyboardButtonStyle = {
-  fontSize: '24px',
-  padding: '20px',
+// Function to generate the key style and add hover effect
+const getKeyStyle = (hoveredKey, key) => ({
+  fontSize: '28px', // Larger font size
+  padding: '20px', // Larger padding for bigger keys
+  border: '1px solid black',
+  borderRadius: '5px',
+  backgroundColor: hoveredKey === key ? '#d3d3d3' : '#f0f0f0', // Darken key on hover
+  textAlign: 'center',
   cursor: 'pointer',
-};
+});
