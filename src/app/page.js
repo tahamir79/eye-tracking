@@ -43,10 +43,10 @@ export default function Home() {
   const handleBlink = useCallback((gazeX, gazeY) => {
     if (!cooldownRef.current) {
       const element = document.elementFromPoint(gazeX, gazeY);
-      
+
       if (element && element.dataset) {
         const value = element.dataset.value;
-        
+
         if (value === "Backspace") {
           // Remove last character
           setTypedText(prev => prev.slice(0, -1));
@@ -254,7 +254,10 @@ export default function Home() {
         <div data-value="\'" style={getKeyStyle(hoveredKey, '\'')}>'</div>
 
         {/* Fourth Row */}
-        <div style={{ gridColumn: 'span 2' }}></div> {/* Empty space for stagger */}
+        <div style={{ gridColumn: 'span 1' }}></div> {/* Empty space for stagger */}
+        <div data-value="Shift" style={getKeyStyle(hoveredKey, 'Shift')}>
+          Shift
+        </div>
         {'ZXCVBNM,./'.split('').map((key) => (
           <div key={key} data-value={key} style={getKeyStyle(hoveredKey, key)}>
             {key}
@@ -283,7 +286,6 @@ export default function Home() {
 const getKeyStyle = (hoveredKey, key) => ({
   fontSize: '28px', // Larger font size
   padding: '20px', // Larger padding for bigger keys
-  border: '1px solid black',
   borderRadius: '5px',
   backgroundColor: hoveredKey === key ? '#d3d3d3' : '#f0f0f0', // Darken key on hover
   textAlign: 'center',

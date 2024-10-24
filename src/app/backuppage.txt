@@ -43,10 +43,10 @@ export default function Home() {
   const handleBlink = useCallback((gazeX, gazeY) => {
     if (!cooldownRef.current) {
       const element = document.elementFromPoint(gazeX, gazeY);
-      
+
       if (element && element.dataset) {
         const value = element.dataset.value;
-        
+
         if (value === "Backspace") {
           // Remove last character
           setTypedText(prev => prev.slice(0, -1));
@@ -167,7 +167,7 @@ export default function Home() {
         height: '100vh', // Make the page fill the viewport
         display: 'flex',
         flexDirection: 'column',
-        justifyContent: 'flex-end', // Align keyboard to the bottom
+        justifyContent: 'space-between', // Align keyboard to the bottom
       }}
     >
       <video ref={videoRef} style={{ display: 'none' }} />
@@ -189,7 +189,7 @@ export default function Home() {
           fontSize: '24px',
           backgroundColor: 'white',
           padding: '10px',
-          width: '90%', // Increase width for text box
+          width: '80%',
           margin: '0 auto',
           borderRadius: '5px',
           textAlign: 'left',
@@ -216,11 +216,11 @@ export default function Home() {
       <div
         style={{
           display: 'grid',
-          gridTemplateColumns: 'repeat(15, 1fr)', // 15 columns for a wider keyboard
+          gridTemplateColumns: 'repeat(14, 1fr)', // 14 columns for correct staggering
           gridGap: '10px',
-          maxWidth: '1400px', // Increased max width for keyboard
+          maxWidth: '1200px',
           margin: '0 auto', // Center the keyboard horizontally
-          marginBottom: '10px', // Keep keyboard near the bottom
+          marginBottom: '10px', // Bring the keyboard down
         }}
       >
         {/* First Row */}
@@ -242,7 +242,7 @@ export default function Home() {
         ))}
 
         {/* Third Row */}
-        <div style={{ gridColumn: 'span 2' }}></div> {/* Empty space for stagger */}
+        <div style={{ gridColumn: 'span 1' }}></div> {/* Empty space for stagger */}
         <div data-value="Shift" style={getKeyStyle(hoveredKey, 'Shift')}>
           Shift
         </div>
@@ -254,7 +254,7 @@ export default function Home() {
         <div data-value="\'" style={getKeyStyle(hoveredKey, '\'')}>'</div>
 
         {/* Fourth Row */}
-        <div style={{ gridColumn: 'span 2' }}></div> {/* Empty space for stagger */}
+        <div style={{ gridColumn: 'span 1' }}></div> {/* Empty space for stagger */}
         <div data-value="Shift" style={getKeyStyle(hoveredKey, 'Shift')}>
           Shift
         </div>
@@ -269,7 +269,7 @@ export default function Home() {
           data-value="Space"
           style={{
             ...getKeyStyle(hoveredKey, 'Space'),
-            gridColumn: 'span 15', // Spanning the entire width
+            gridColumn: 'span 14', // Spanning the entire width
             textAlign: 'center',
             fontSize: '28px', // Larger font size
             padding: '20px', // Increase padding for larger key
@@ -286,7 +286,6 @@ export default function Home() {
 const getKeyStyle = (hoveredKey, key) => ({
   fontSize: '28px', // Larger font size
   padding: '20px', // Larger padding for bigger keys
-  border: '1px solid black',
   borderRadius: '5px',
   backgroundColor: hoveredKey === key ? '#d3d3d3' : '#f0f0f0', // Darken key on hover
   textAlign: 'center',
