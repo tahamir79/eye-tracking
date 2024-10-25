@@ -55,9 +55,7 @@ export default function Home() {
             setIsShiftActive((prev) => !prev);
           } else if (value === 'Space') {
             setTypedText((prev) => prev + ' ');
-          } else if (value === 'Enter') {
-            setTypedText((prev) => prev + '\n'); // Add a newline for Enter key
-          } else if (value) {
+          } else if (value && value !== 'Enter') { // Remove Enter key functionality
             let letter = isShiftActive ? value.toUpperCase() : value.toLowerCase();
             setTypedText((prev) => prev + letter);
             setIsShiftActive(false); // Turn off Shift after one use
@@ -187,7 +185,7 @@ export default function Home() {
           borderRadius: '5px',
           textAlign: 'left',
           border: '1px solid black',
-          whiteSpace: 'pre-wrap', // Allows for new lines to be displayed
+          whiteSpace: 'nowrap',
           overflow: 'hidden',
         }}
       >
@@ -211,7 +209,7 @@ export default function Home() {
           display: 'grid',
           gridTemplateColumns: 'repeat(14, 1fr)', // First row with 14 columns
           gridGap: '0px', // No gap between keys
-          maxWidth: '1400px', // Increased width for larger keys
+          maxWidth: '1200px',
           margin: '0 auto',
           marginBottom: '10px',
         }}
@@ -263,7 +261,7 @@ export default function Home() {
           gridColumn: 'span 10',
           backgroundColor: hoveredKey === 'Space' ? 'lightgrey' : 'white',
           borderRadius: '5px',
-          padding: '20px', // Increased padding for larger Space key
+          padding: '10px',
           textAlign: 'center',
           cursor: 'pointer',
           boxShadow: hoveredKey === 'Space' ? '0px 4px 10px rgba(0, 0, 0, 0.1)' : 'none',
@@ -277,8 +275,8 @@ export default function Home() {
 
 // Key styling function
 const getKeyStyle = (hoveredKey, key) => ({
-  fontSize: '36px', // Increased font size for larger keys
-  padding: '20px', // Increased padding for larger key area
+  fontSize: '28px',
+  padding: '10px', // Reduced padding for a tighter layout
   borderRadius: '3px',
   backgroundColor: hoveredKey === key ? '#d3d3d3' : '#f0f0f0',
   textAlign: 'center',
