@@ -15,7 +15,6 @@ export default function Home() {
   const [typedText, setTypedText] = useState('');
   const [isShiftActive, setIsShiftActive] = useState(false); // Shift state
   const [hoveredKey, setHoveredKey] = useState(null); // For key hover effect
-  const [suggestedWords, setSuggestedWords] = useState([]); // Suggested words from the model
 
   const prevCursorPosition = useRef({
     x: window.innerWidth / 2,
@@ -142,33 +141,6 @@ export default function Home() {
     return earLeft < EAR_THRESHOLD || earRight < EAR_THRESHOLD;
   };
 
-  const fetchWordSuggestions = async (text) => {
-    try {
-      const response = await fetch('https://api-inference.huggingface.co/models/gpt2', {
-        method: 'POST',
-        headers: {
-          Authorization: `Bearer YOUR_HUGGINGFACE_API_KEY`, // Replace with your actual API key
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          inputs: text,
-          parameters: { top_k: 3, max_new_tokens: 1 }, // Get the top 3 predictions
-        }),
-      });
-
-      const data = await response.json();
-      return data.length > 0 ? data[0].generated_text.split(' ').slice(-3) : [];
-    } catch (error) {
-      console.error('Error fetching suggestions:', error);
-      return [];
-    }
-  };
-
-  const getSuggestions = async (currentText) => {
-    const suggestions = await fetchWordSuggestions(currentText);
-    setSuggestedWords(suggestions);
-  };
-
   const handleBlink = useCallback(
     (gazeX, gazeY) => {
       if (!cooldownRef.current) {
@@ -185,16 +157,10 @@ export default function Home() {
             setTypedText((prev) => prev + ' ');
           } else if (value === 'Enter') {
             setTypedText((prev) => prev + '\n'); // Add a newline for Enter key
-          } else if (suggestedWords.includes(value)) {
-            setTypedText((prev) => prev + ' ' + value + ' '); // Add suggested word with space
-            setSuggestedWords([]); // Clear suggestions after selection
           } else if (value) {
             let letter = isShiftActive ? value.toUpperCase() : value.toLowerCase();
             setTypedText((prev) => prev + letter);
             setIsShiftActive(false); // Turn off Shift after one use
-
-            // Get the next word suggestions
-            getSuggestions(typedText + letter);
           }
         }
 
@@ -204,7 +170,7 @@ export default function Home() {
         }, 1000); // Adjust cooldown as needed
       }
     },
-    [isShiftActive, suggestedWords, typedText]
+    [isShiftActive]
   );
 
   useEffect(() => {
@@ -348,25 +314,6 @@ export default function Home() {
         </span>
       </div>
 
-      {/* Suggested Words */}
-      <div style={{ textAlign: 'center', marginBottom: '10px' }}>
-        {suggestedWords.map((word, index) => (
-          <span
-            key={index}
-            data-value={word}
-            style={{
-              margin: '0 5px',
-              padding: '5px 10px',
-              backgroundColor: hoveredKey === word ? '#d3d3d3' : '#f0f0f0',
-              borderRadius: '3px',
-              cursor: 'pointer',
-            }}
-          >
-            {word}
-          </span>
-        ))}
-      </div>
-
       {/* QWERTY Keyboard Layout */}
       <div
         style={{
@@ -411,9 +358,8 @@ export default function Home() {
         {/* Third Row */}
         <div style={{ gridColumn: 'span 1' }}></div> {/* Empty space for alignment */}
         {'ASDFGHJKL;\'"'.split('').map((key) => {
-          const ref = ['Enter'].includes(key) ? useRef(null) : null;
           return (
-            <div key={key} data-value={key} ref={ref} style={getKeyStyle(hoveredKey, key)}>
+            <div key={key} data-value={key} style={getKeyStyle(hoveredKey, key)}>
               {key}
             </div>
           );
