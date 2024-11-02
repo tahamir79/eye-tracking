@@ -8,17 +8,118 @@ export default function Home() {
   const videoRef = useRef(null);
   const canvasRef = useRef(null);
 
-  const [cursorPosition, setCursorPosition] = useState({ x: 0, y: 0 });
+  const [cursorPosition, setCursorPosition] = useState({
+    x: window.innerWidth / 2,
+    y: window.innerHeight / 2,
+  });
   const [typedText, setTypedText] = useState('');
-  const [cooldown, setCooldown] = useState(false);
   const [isShiftActive, setIsShiftActive] = useState(false); // Shift state
   const [hoveredKey, setHoveredKey] = useState(null); // For key hover effect
+  const [suggestedWords, setSuggestedWords] = useState([]); // Suggested words from the model
 
-  const prevCursorPosition = useRef({ x: 0, y: 0 });
-  const cooldownRef = useRef(null);
+  const prevCursorPosition = useRef({
+    x: window.innerWidth / 2,
+    y: window.innerHeight / 2,
+  });
+  const cooldownRef = useRef(false);
 
   const EAR_THRESHOLD = 0.25;
   const GAZE_SCALE = 5.0; // Increased value for higher sensitivity to eye movement
+
+  // Refs for edge keys
+  const edgeKeyRefs = {
+    topKeys: [],
+    leftKeys: [],
+    rightKeys: [],
+    bottomKeys: [],
+  };
+
+  // Function to add refs to edge keys
+  const addEdgeKeyRef = (key, ref) => {
+    // Top edge keys
+    if (['1', '2', '3', '4', '5', '6', '7', '8', '9', '0', '-', '=', 'Backspace'].includes(key)) {
+      edgeKeyRefs.topKeys.push(ref);
+    }
+    // Left edge keys
+    if (['q', 'a', 'z'].includes(key.toLowerCase())) {
+      edgeKeyRefs.leftKeys.push(ref);
+    }
+    // Right edge keys
+    if (['Backspace', '\\', 'Enter', 'Shift'].includes(key)) {
+      edgeKeyRefs.rightKeys.push(ref);
+    }
+    // Bottom edge keys (Space bar)
+    if (key === 'Space') {
+      edgeKeyRefs.bottomKeys.push(ref);
+    }
+  };
+
+  // Keyboard boundaries
+  const keyboardBounds = useRef({
+    left: 0,
+    right: window.innerWidth,
+    top: 0,
+    bottom: 0, // Will be set after rendering
+  });
+
+  useEffect(() => {
+    // Calculate keyboard boundaries after rendering
+    const calculateKeyboardBounds = () => {
+      let left = window.innerWidth;
+      let right = 0;
+      let top = window.innerHeight;
+      let bottom = 0;
+
+      // Calculate left boundary
+      edgeKeyRefs.leftKeys.forEach((ref) => {
+        if (ref.current) {
+          const rect = ref.current.getBoundingClientRect();
+          if (rect.left < left) {
+            left = rect.left;
+          }
+        }
+      });
+
+      // Calculate right boundary
+      edgeKeyRefs.rightKeys.forEach((ref) => {
+        if (ref.current) {
+          const rect = ref.current.getBoundingClientRect();
+          if (rect.right > right) {
+            right = rect.right;
+          }
+        }
+      });
+
+      // Calculate top boundary
+      edgeKeyRefs.topKeys.forEach((ref) => {
+        if (ref.current) {
+          const rect = ref.current.getBoundingClientRect();
+          if (rect.top < top) {
+            top = rect.top;
+          }
+        }
+      });
+
+      // Calculate bottom boundary (using the space bar)
+      edgeKeyRefs.bottomKeys.forEach((ref) => {
+        if (ref.current) {
+          const rect = ref.current.getBoundingClientRect();
+          if (rect.bottom > bottom) {
+            bottom = rect.bottom;
+          }
+        }
+      });
+
+      keyboardBounds.current = { left, right, top, bottom };
+    };
+
+    calculateKeyboardBounds();
+    window.addEventListener('resize', calculateKeyboardBounds);
+
+    return () => {
+      window.removeEventListener('resize', calculateKeyboardBounds);
+    };
+  }, []);
 
   // Compute Eye Aspect Ratio (EAR) to detect blinks
   const computeEAR = (eye) => {
@@ -41,6 +142,33 @@ export default function Home() {
     return earLeft < EAR_THRESHOLD || earRight < EAR_THRESHOLD;
   };
 
+  const fetchWordSuggestions = async (text) => {
+    try {
+      const response = await fetch('https://api-inference.huggingface.co/models/gpt2', {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer YOUR_HUGGINGFACE_API_KEY`, // Replace with your actual API key
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          inputs: text,
+          parameters: { top_k: 3, max_new_tokens: 1 }, // Get the top 3 predictions
+        }),
+      });
+
+      const data = await response.json();
+      return data.length > 0 ? data[0].generated_text.split(' ').slice(-3) : [];
+    } catch (error) {
+      console.error('Error fetching suggestions:', error);
+      return [];
+    }
+  };
+
+  const getSuggestions = async (currentText) => {
+    const suggestions = await fetchWordSuggestions(currentText);
+    setSuggestedWords(suggestions);
+  };
+
   const handleBlink = useCallback(
     (gazeX, gazeY) => {
       if (!cooldownRef.current) {
@@ -57,28 +185,31 @@ export default function Home() {
             setTypedText((prev) => prev + ' ');
           } else if (value === 'Enter') {
             setTypedText((prev) => prev + '\n'); // Add a newline for Enter key
+          } else if (suggestedWords.includes(value)) {
+            setTypedText((prev) => prev + ' ' + value + ' '); // Add suggested word with space
+            setSuggestedWords([]); // Clear suggestions after selection
           } else if (value) {
             let letter = isShiftActive ? value.toUpperCase() : value.toLowerCase();
             setTypedText((prev) => prev + letter);
             setIsShiftActive(false); // Turn off Shift after one use
+
+            // Get the next word suggestions
+            getSuggestions(typedText + letter);
           }
         }
 
-        setCooldown(true);
         cooldownRef.current = true;
-
         setTimeout(() => {
           cooldownRef.current = false;
-        }, 1000); // Adjust as needed
+        }, 1000); // Adjust cooldown as needed
       }
     },
-    [isShiftActive]
+    [isShiftActive, suggestedWords, typedText]
   );
 
   useEffect(() => {
     const videoElement = videoRef.current;
     const canvasElement = canvasRef.current;
-    const canvasCtx = canvasElement.getContext('2d');
 
     const faceMesh = new FaceMesh({
       locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh/${file}`,
@@ -86,15 +217,12 @@ export default function Home() {
 
     faceMesh.setOptions({
       maxNumFaces: 1,
-      refineLandmarks: true,
+      refineLandmarks: true, // Enable iris landmarks for better accuracy
       minDetectionConfidence: 0.5,
       minTrackingConfidence: 0.5,
     });
 
     faceMesh.onResults((results) => {
-      canvasCtx.clearRect(0, 0, canvasElement.width, canvasElement.height);
-      canvasCtx.drawImage(results.image, 0, 0, canvasElement.width, canvasElement.height);
-
       if (results.multiFaceLandmarks && results.multiFaceLandmarks.length > 0) {
         const landmarks = results.multiFaceLandmarks[0];
 
@@ -117,10 +245,20 @@ export default function Home() {
         const amplifiedGazeY = 0.5 + GAZE_SCALE * (gazePoint.y - 0.5);
 
         // Map amplified gaze to screen coordinates
-        const screenX = (1 - amplifiedGazeX) * window.innerWidth;
-        const screenY = amplifiedGazeY * window.innerHeight;
+        let screenX = (1 - amplifiedGazeX) * window.innerWidth;
+        let screenY = amplifiedGazeY * window.innerHeight;
 
-        // Increase smoothing alpha by 15% (from 0.05 to 0.2)
+        // Clamp gaze coordinates within the keyboard bounds
+        screenX = Math.max(
+          keyboardBounds.current.left,
+          Math.min(screenX, keyboardBounds.current.right)
+        );
+        screenY = Math.max(
+          keyboardBounds.current.top,
+          Math.min(screenY, keyboardBounds.current.bottom)
+        );
+
+        // Smoothing
         const alpha = 0.2; // Less smoothing, more responsive
         const smoothedX = alpha * screenX + (1 - alpha) * prevCursorPosition.current.x;
         const smoothedY = alpha * screenY + (1 - alpha) * prevCursorPosition.current.y;
@@ -155,24 +293,29 @@ export default function Home() {
   return (
     <div
       style={{
-        cursor: 'url("https://image.shutterstock.com/image-vector/cursor-hand-icon-pointer-vector-260nw-1144710749.jpg"), auto',
+        cursor: 'none', // Hide the default cursor
         height: '100vh',
-        display: 'flex',
-        flexDirection: 'column',
-        justifyContent: 'space-between',
+        position: 'relative',
         fontSize: '115%',
+        overflow: 'hidden', // Lock scrolling
       }}
     >
       <video ref={videoRef} style={{ display: 'none' }} />
-      <canvas
-        ref={canvasRef}
+      <canvas ref={canvasRef} style={{ display: 'none' }} />
+
+      {/* Pointer (Disabled as per your request) */}
+      {/* <div
         style={{
-          display: 'none',
           position: 'absolute',
-          width: '100%',
-          height: '100%',
+          top: cursorPosition.y - 10,
+          left: cursorPosition.x - 10,
+          width: '20px',
+          height: '20px',
+          borderRadius: '50%',
+          backgroundColor: 'red',
+          pointerEvents: 'none',
         }}
-      />
+      /> */}
 
       {/* Text Box */}
       <div
@@ -205,68 +348,118 @@ export default function Home() {
         </span>
       </div>
 
-      {/* QWERTY keyboard */}
+      {/* Suggested Words */}
+      <div style={{ textAlign: 'center', marginBottom: '10px' }}>
+        {suggestedWords.map((word, index) => (
+          <span
+            key={index}
+            data-value={word}
+            style={{
+              margin: '0 5px',
+              padding: '5px 10px',
+              backgroundColor: hoveredKey === word ? '#d3d3d3' : '#f0f0f0',
+              borderRadius: '3px',
+              cursor: 'pointer',
+            }}
+          >
+            {word}
+          </span>
+        ))}
+      </div>
+
+      {/* QWERTY Keyboard Layout */}
       <div
         style={{
           display: 'grid',
-          gridTemplateColumns: 'repeat(14, 1fr)', // First row with 14 columns
-          gridGap: '0px', // No gap between keys
-          maxWidth: '1400px', // Increased width for larger keys
+          gridTemplateColumns: 'repeat(14, 1fr)',
+          gridGap: '0px',
+          maxWidth: '1400px',
           margin: '0 auto',
           marginBottom: '10px',
         }}
       >
         {/* First Row */}
-        {'1234567890-='.split('').map((key) => (
-          <div key={key} data-value={key} style={getKeyStyle(hoveredKey, key)}>
-            {key}
-          </div>
-        ))}
-        <div data-value="Backspace" style={getKeyStyle(hoveredKey, 'Backspace')}>
+        {'1234567890-='.split('').map((key) => {
+          const ref = useRef(null);
+          addEdgeKeyRef(key, ref);
+          return (
+            <div key={key} data-value={key} ref={ref} style={getKeyStyle(hoveredKey, key)}>
+              {key}
+            </div>
+          );
+        })}
+        <div
+          data-value="Backspace"
+          ref={(ref) => addEdgeKeyRef('Backspace', { current: ref })}
+          style={getKeyStyle(hoveredKey, 'Backspace')}
+        >
           Backspace
         </div>
 
         {/* Second Row */}
         <div style={{ gridColumn: 'span 1' }}></div> {/* Empty space for alignment */}
-        {'QWERTYUIOP[]\\'.split('').map((key) => (
-          <div key={key} data-value={key} style={getKeyStyle(hoveredKey, key)}>
-            {key}
-          </div>
-        ))}
+        {'QWERTYUIOP[]\\'.split('').map((key) => {
+          const ref = key === '\\' ? useRef(null) : null;
+          if (ref) addEdgeKeyRef(key, ref);
+          return (
+            <div key={key} data-value={key} ref={ref} style={getKeyStyle(hoveredKey, key)}>
+              {key}
+            </div>
+          );
+        })}
 
         {/* Third Row */}
         <div style={{ gridColumn: 'span 1' }}></div> {/* Empty space for alignment */}
-        {'ASDFGHJKL;\'"'.split('').map((key) => (
-          <div key={key} data-value={key} style={getKeyStyle(hoveredKey, key)}>
-            {key}
-          </div>
-        ))}
-        <div data-value="Enter" style={getKeyStyle(hoveredKey, 'Enter')}>
+        {'ASDFGHJKL;\'"'.split('').map((key) => {
+          const ref = ['Enter'].includes(key) ? useRef(null) : null;
+          return (
+            <div key={key} data-value={key} ref={ref} style={getKeyStyle(hoveredKey, key)}>
+              {key}
+            </div>
+          );
+        })}
+        <div
+          data-value="Enter"
+          ref={(ref) => addEdgeKeyRef('Enter', { current: ref })}
+          style={getKeyStyle(hoveredKey, 'Enter')}
+        >
           Enter
         </div>
 
         {/* Fourth Row */}
-        <div data-value="Shift" style={getKeyStyle(hoveredKey, 'Shift')}>
+        <div
+          data-value="Shift"
+          ref={(ref) => addEdgeKeyRef('Shift', { current: ref })}
+          style={getKeyStyle(hoveredKey, 'Shift')}
+        >
           Shift
         </div>
-        {'ZXCVBNM,./'.split('').map((key) => (
-          <div key={key} data-value={key} style={getKeyStyle(hoveredKey, key)}>
-            {key}
-          </div>
-        ))}
+        {'ZXCVBNM,./'.split('').map((key) => {
+          const ref = ['z'].includes(key.toLowerCase()) ? useRef(null) : null;
+          if (ref) addEdgeKeyRef(key, ref);
+          return (
+            <div key={key} data-value={key} ref={ref} style={getKeyStyle(hoveredKey, key)}>
+              {key}
+            </div>
+          );
+        })}
       </div>
 
       {/* Space Bar */}
       <div
+        id="space-bar"
         data-value="Space"
+        ref={(ref) => addEdgeKeyRef('Space', { current: ref })}
         style={{
-          gridColumn: 'span 10',
-          backgroundColor: hoveredKey === 'Space' ? 'lightgrey' : 'white',
+          gridColumn: 'span 14',
+          backgroundColor: hoveredKey === 'Space' ? '#d3d3d3' : 'white',
           borderRadius: '5px',
           padding: '20px', // Increased padding for larger Space key
           textAlign: 'center',
           cursor: 'pointer',
           boxShadow: hoveredKey === 'Space' ? '0px 4px 10px rgba(0, 0, 0, 0.1)' : 'none',
+          margin: '0 auto',
+          width: '100%',
         }}
       >
         Space
