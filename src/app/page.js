@@ -1,6 +1,6 @@
 "use client"; // Ensure the component is treated as a Client Component
 
-import { useEffect, useRef, useState, useCallback } from 'react';
+import React, { useEffect, useRef, useState, useCallback } from 'react';
 import { FaceMesh } from '@mediapipe/face_mesh';
 import { Camera } from '@mediapipe/camera_utils';
 
@@ -9,54 +9,51 @@ export default function Home() {
   const canvasRef = useRef(null);
 
   const [cursorPosition, setCursorPosition] = useState({
-    x: window.innerWidth / 2,
-    y: window.innerHeight / 2,
+    x: typeof window !== 'undefined' ? window.innerWidth / 2 : 0,
+    y: typeof window !== 'undefined' ? window.innerHeight / 2 : 0,
   });
   const [typedText, setTypedText] = useState('');
   const [isShiftActive, setIsShiftActive] = useState(false); // Shift state
   const [hoveredKey, setHoveredKey] = useState(null); // For key hover effect
 
-  const prevCursorPosition = useRef({
-    x: window.innerWidth / 2,
-    y: window.innerHeight / 2,
-  });
+  const prevCursorPosition = useRef(cursorPosition);
   const cooldownRef = useRef(false);
 
   const EAR_THRESHOLD = 0.25;
   const GAZE_SCALE = 5.0; // Increased value for higher sensitivity to eye movement
 
   // Refs for edge keys
-  const edgeKeyRefs = {
+  const edgeKeyRefs = useRef({
     topKeys: [],
     leftKeys: [],
     rightKeys: [],
     bottomKeys: [],
-  };
+  });
 
   // Function to add refs to edge keys
   const addEdgeKeyRef = (key, ref) => {
     // Top edge keys
     if (['1', '2', '3', '4', '5', '6', '7', '8', '9', '0', '-', '=', 'Backspace'].includes(key)) {
-      edgeKeyRefs.topKeys.push(ref);
+      edgeKeyRefs.current.topKeys.push(ref);
     }
     // Left edge keys
     if (['q', 'a', 'z'].includes(key.toLowerCase())) {
-      edgeKeyRefs.leftKeys.push(ref);
+      edgeKeyRefs.current.leftKeys.push(ref);
     }
     // Right edge keys
     if (['Backspace', '\\', 'Enter', 'Shift'].includes(key)) {
-      edgeKeyRefs.rightKeys.push(ref);
+      edgeKeyRefs.current.rightKeys.push(ref);
     }
     // Bottom edge keys (Space bar)
     if (key === 'Space') {
-      edgeKeyRefs.bottomKeys.push(ref);
+      edgeKeyRefs.current.bottomKeys.push(ref);
     }
   };
 
   // Keyboard boundaries
   const keyboardBounds = useRef({
     left: 0,
-    right: window.innerWidth,
+    right: typeof window !== 'undefined' ? window.innerWidth : 0,
     top: 0,
     bottom: 0, // Will be set after rendering
   });
@@ -70,7 +67,7 @@ export default function Home() {
       let bottom = 0;
 
       // Calculate left boundary
-      edgeKeyRefs.leftKeys.forEach((ref) => {
+      edgeKeyRefs.current.leftKeys.forEach((ref) => {
         if (ref.current) {
           const rect = ref.current.getBoundingClientRect();
           if (rect.left < left) {
@@ -80,7 +77,7 @@ export default function Home() {
       });
 
       // Calculate right boundary
-      edgeKeyRefs.rightKeys.forEach((ref) => {
+      edgeKeyRefs.current.rightKeys.forEach((ref) => {
         if (ref.current) {
           const rect = ref.current.getBoundingClientRect();
           if (rect.right > right) {
@@ -90,7 +87,7 @@ export default function Home() {
       });
 
       // Calculate top boundary
-      edgeKeyRefs.topKeys.forEach((ref) => {
+      edgeKeyRefs.current.topKeys.forEach((ref) => {
         if (ref.current) {
           const rect = ref.current.getBoundingClientRect();
           if (rect.top < top) {
@@ -100,7 +97,7 @@ export default function Home() {
       });
 
       // Calculate bottom boundary (using the space bar)
-      edgeKeyRefs.bottomKeys.forEach((ref) => {
+      edgeKeyRefs.current.bottomKeys.forEach((ref) => {
         if (ref.current) {
           const rect = ref.current.getBoundingClientRect();
           if (rect.bottom > bottom) {
@@ -118,7 +115,8 @@ export default function Home() {
     return () => {
       window.removeEventListener('resize', calculateKeyboardBounds);
     };
-  }, []);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []); // We disable the dependency warning here because edgeKeyRefs.current doesn't change
 
   // Compute Eye Aspect Ratio (EAR) to detect blinks
   const computeEAR = (eye) => {
@@ -128,7 +126,7 @@ export default function Home() {
     return (p2_p6 + p3_p5) / (2.0 * p1_p4);
   };
 
-  const isBlinking = (landmarks) => {
+  const isBlinking = useCallback((landmarks) => {
     const leftEyeIndices = [33, 160, 158, 133, 153, 144];
     const rightEyeIndices = [362, 385, 387, 263, 373, 380];
 
@@ -139,7 +137,7 @@ export default function Home() {
     const earRight = computeEAR(rightEye);
 
     return earLeft < EAR_THRESHOLD || earRight < EAR_THRESHOLD;
-  };
+  }, []);
 
   const handleBlink = useCallback(
     (gazeX, gazeY) => {
@@ -254,7 +252,19 @@ export default function Home() {
       });
       camera.start();
     }
-  }, [handleBlink]);
+  }, [handleBlink, isBlinking]); // Include isBlinking in dependencies
+
+  // Refs for keys
+  const keyRefs = useRef({});
+
+  // Helper function to get or create a ref for a key
+  const getKeyRef = (key) => {
+    if (!keyRefs.current[key]) {
+      keyRefs.current[key] = React.createRef();
+      addEdgeKeyRef(key, keyRefs.current[key]);
+    }
+    return keyRefs.current[key];
+  };
 
   return (
     <div
@@ -268,20 +278,6 @@ export default function Home() {
     >
       <video ref={videoRef} style={{ display: 'none' }} />
       <canvas ref={canvasRef} style={{ display: 'none' }} />
-
-      {/* Pointer (Disabled as per your request) */}
-      {/* <div
-        style={{
-          position: 'absolute',
-          top: cursorPosition.y - 10,
-          left: cursorPosition.x - 10,
-          width: '20px',
-          height: '20px',
-          borderRadius: '50%',
-          backgroundColor: 'red',
-          pointerEvents: 'none',
-        }}
-      /> */}
 
       {/* Text Box */}
       <div
@@ -326,18 +322,19 @@ export default function Home() {
         }}
       >
         {/* First Row */}
-        {'1234567890-='.split('').map((key) => {
-          const ref = useRef(null);
-          addEdgeKeyRef(key, ref);
-          return (
-            <div key={key} data-value={key} ref={ref} style={getKeyStyle(hoveredKey, key)}>
-              {key}
-            </div>
-          );
-        })}
+        {'1234567890-='.split('').map((key) => (
+          <div
+            key={key}
+            data-value={key}
+            ref={getKeyRef(key)}
+            style={getKeyStyle(hoveredKey, key)}
+          >
+            {key}
+          </div>
+        ))}
         <div
           data-value="Backspace"
-          ref={(ref) => addEdgeKeyRef('Backspace', { current: ref })}
+          ref={getKeyRef('Backspace')}
           style={getKeyStyle(hoveredKey, 'Backspace')}
         >
           Backspace
@@ -345,28 +342,27 @@ export default function Home() {
 
         {/* Second Row */}
         <div style={{ gridColumn: 'span 1' }}></div> {/* Empty space for alignment */}
-        {'QWERTYUIOP[]\\'.split('').map((key) => {
-          const ref = key === '\\' ? useRef(null) : null;
-          if (ref) addEdgeKeyRef(key, ref);
-          return (
-            <div key={key} data-value={key} ref={ref} style={getKeyStyle(hoveredKey, key)}>
-              {key}
-            </div>
-          );
-        })}
+        {'QWERTYUIOP[]\\'.split('').map((key) => (
+          <div
+            key={key}
+            data-value={key}
+            ref={key === '\\' ? getKeyRef(key) : null}
+            style={getKeyStyle(hoveredKey, key)}
+          >
+            {key}
+          </div>
+        ))}
 
         {/* Third Row */}
         <div style={{ gridColumn: 'span 1' }}></div> {/* Empty space for alignment */}
-        {'ASDFGHJKL;\'"'.split('').map((key) => {
-          return (
-            <div key={key} data-value={key} style={getKeyStyle(hoveredKey, key)}>
-              {key}
-            </div>
-          );
-        })}
+        {'ASDFGHJKL;\'"'.split('').map((key) => (
+          <div key={key} data-value={key} style={getKeyStyle(hoveredKey, key)}>
+            {key}
+          </div>
+        ))}
         <div
           data-value="Enter"
-          ref={(ref) => addEdgeKeyRef('Enter', { current: ref })}
+          ref={getKeyRef('Enter')}
           style={getKeyStyle(hoveredKey, 'Enter')}
         >
           Enter
@@ -375,27 +371,28 @@ export default function Home() {
         {/* Fourth Row */}
         <div
           data-value="Shift"
-          ref={(ref) => addEdgeKeyRef('Shift', { current: ref })}
+          ref={getKeyRef('Shift')}
           style={getKeyStyle(hoveredKey, 'Shift')}
         >
           Shift
         </div>
-        {'ZXCVBNM,./'.split('').map((key) => {
-          const ref = ['z'].includes(key.toLowerCase()) ? useRef(null) : null;
-          if (ref) addEdgeKeyRef(key, ref);
-          return (
-            <div key={key} data-value={key} ref={ref} style={getKeyStyle(hoveredKey, key)}>
-              {key}
-            </div>
-          );
-        })}
+        {'ZXCVBNM,./'.split('').map((key) => (
+          <div
+            key={key}
+            data-value={key}
+            ref={key.toLowerCase() === 'z' ? getKeyRef(key) : null}
+            style={getKeyStyle(hoveredKey, key)}
+          >
+            {key}
+          </div>
+        ))}
       </div>
 
       {/* Space Bar */}
       <div
         id="space-bar"
         data-value="Space"
-        ref={(ref) => addEdgeKeyRef('Space', { current: ref })}
+        ref={getKeyRef('Space')}
         style={{
           gridColumn: 'span 14',
           backgroundColor: hoveredKey === 'Space' ? '#d3d3d3' : 'white',
