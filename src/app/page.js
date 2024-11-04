@@ -14,6 +14,7 @@ export default function Home() {
   });
   const [typedText, setTypedText] = useState('');
   const [isShiftActive, setIsShiftActive] = useState(false); // Shift state
+  const isShiftActiveRef = useRef(isShiftActive); // Ref to hold the current value
   const [hoveredKey, setHoveredKey] = useState(null); // For key hover effect
 
   const prevCursorPosition = useRef(cursorPosition);
@@ -147,18 +148,41 @@ export default function Home() {
         if (element && element.dataset) {
           const value = element.dataset.value;
 
-          if (value === 'Backspace') {
+          if (value === 'Shift') {
+            setIsShiftActive((prev) => {
+              const newState = !prev;
+              isShiftActiveRef.current = newState; // Update ref synchronously
+              return newState;
+            });
+          } else if (value === 'Backspace') {
             setTypedText((prev) => prev.slice(0, -1));
-          } else if (value === 'Shift') {
-            setIsShiftActive((prev) => !prev);
+            // Deactivate Shift key after any key press
+            if (isShiftActiveRef.current) {
+              setIsShiftActive(false);
+              isShiftActiveRef.current = false;
+            }
           } else if (value === 'Space') {
             setTypedText((prev) => prev + ' ');
+            // Deactivate Shift key after any key press
+            if (isShiftActiveRef.current) {
+              setIsShiftActive(false);
+              isShiftActiveRef.current = false;
+            }
           } else if (value === 'Enter') {
             setTypedText((prev) => prev + '\n'); // Add a newline for Enter key
+            // Deactivate Shift key after any key press
+            if (isShiftActiveRef.current) {
+              setIsShiftActive(false);
+              isShiftActiveRef.current = false;
+            }
           } else if (value) {
-            let letter = isShiftActive ? value.toUpperCase() : value.toLowerCase();
+            let letter = isShiftActiveRef.current ? value.toUpperCase() : value.toLowerCase();
             setTypedText((prev) => prev + letter);
-            setIsShiftActive(false); // Turn off Shift after one use
+            // Deactivate Shift key after a letter is pressed
+            if (isShiftActiveRef.current) {
+              setIsShiftActive(false);
+              isShiftActiveRef.current = false;
+            }
           }
         }
 
@@ -168,7 +192,7 @@ export default function Home() {
         }, 1000); // Adjust cooldown as needed
       }
     },
-    [isShiftActive]
+    [] // Empty dependency array
   );
 
   useEffect(() => {
@@ -279,35 +303,57 @@ export default function Home() {
       <video ref={videoRef} style={{ display: 'none' }} />
       <canvas ref={canvasRef} style={{ display: 'none' }} />
 
-      {/* Text Box */}
+      {/* Container for Text Box and Shift Indicator */}
       <div
         style={{
           position: 'relative',
           top: '10px',
-          fontSize: '24px',
-          backgroundColor: 'white',
-          padding: '10px',
           width: '80%',
           margin: '0 auto',
-          borderRadius: '5px',
-          textAlign: 'left',
-          border: '1px solid black',
-          whiteSpace: 'pre-wrap', // Allows for new lines to be displayed
-          overflow: 'hidden',
+          display: 'flex',
+          alignItems: 'center',
         }}
       >
-        {typedText}
-        <span
+        {/* Text Box */}
+        <div
           style={{
-            display: 'inline-block',
-            width: '1ch',
-            backgroundColor: 'black',
-            marginLeft: '5px',
-            animation: 'blink 1s step-start infinite',
+            fontSize: '24px',
+            backgroundColor: 'white',
+            padding: '10px',
+            flex: 1,
+            borderRadius: '5px',
+            textAlign: 'left',
+            border: '1px solid black',
+            whiteSpace: 'pre-wrap', // Allows for new lines to be displayed
+            overflow: 'hidden',
           }}
         >
-          &nbsp;
-        </span>
+          {typedText}
+          <span
+            style={{
+              display: 'inline-block',
+              width: '1ch',
+              backgroundColor: 'black',
+              marginLeft: '5px',
+              animation: 'blink 1s step-start infinite',
+            }}
+          >
+            &nbsp;
+          </span>
+        </div>
+
+        {/* Shift Key Indicator */}
+        {isShiftActive && (
+          <div
+            style={{
+              marginLeft: '10px',
+              color: 'red',
+              fontWeight: 'bold',
+            }}
+          >
+            Shift key is active
+          </div>
+        )}
       </div>
 
       {/* QWERTY Keyboard Layout */}
