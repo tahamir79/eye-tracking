@@ -276,6 +276,7 @@ export default function Home() {
     </div>
   );
 }
+Home.displayName = 'Home';
 
 /* KEY helper component */
 const Key = React.forwardRef(({ k, hovered }, ref) => (
