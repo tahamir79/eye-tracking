@@ -295,4 +295,3 @@ const Key = React.forwardRef(({ k, hovered }, ref) => (
   </div>
 ));
 const Spacer = () => <div style={{ gridColumn: "span 1" }} />;
-Home.displayName = 'Home';
