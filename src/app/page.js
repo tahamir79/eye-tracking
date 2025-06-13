@@ -17,7 +17,7 @@ const GAZE_SCALE = 5.0;
 const SUGGEST_BAR_HEIGHT = 80; // px -– space above the first key row that suggestions occupy
 
 /*  ─────────────────────────────── */
-function Home() {
+export default function Home() {
   /* webcam refs */
   const videoRef = useRef(null);
   const canvasRef = useRef(null);
@@ -276,7 +276,8 @@ function Home() {
     </div>
   );
 }
-Home.displayName = 'HomePage';
+Home.displayName = 'Home';
+
 
 /* KEY helper component */
 const Key = React.forwardRef(({ k, hovered }, ref) => (
@@ -296,5 +297,3 @@ const Key = React.forwardRef(({ k, hovered }, ref) => (
   </div>
 ));
 const Spacer = () => <div style={{ gridColumn: "span 1" }} />;
-
-export default Home;
