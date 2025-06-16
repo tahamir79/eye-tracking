@@ -1,17 +1,29 @@
 /* ------------------------------------------------------------------
- * Full-screen attention grid — re-enable hit-testing so elementFromPoint works
+ * Full-screen attention grid
+ *  – colour ramp now: light-blue → dark-blue → black
  * ---------------------------------------------------------------- */
 import React, { memo } from "react";
 
-/* ---- colour ramp ------------------------------------------------ */
+/* ---------- dwell-time → colour ---------------------------------- *
+ *  <   50 ms   : #ffffff        (white, not yet visited)
+ *  50-500 ms   : #e5f2ff        (very-light blue)
+ *  0.5-1.5 s   : #99ccff        (soft sky-blue)
+ *  1.5-3 s     : #3399ff        (medium blue)
+ *  3-6 s       : #0066cc        (dark royal-blue)
+ *  6-10 s      : #003366        (midnight blue)
+ *  ≥10 s       : #000000        (black – maximum dwell)
+ * ---------------------------------------------------------------- */
 export function dwellToColor(ms) {
-  if (ms >= 3000) return "#cc0000";   // deep red
-  if (ms >= 1500) return "#ff6666";   // medium
-  if (ms >    50) return "#ffe5e5";   // light pink
-  return "#ffffff";                   // <50 ms : white (barely looked)
+  if (ms >= 10000) return "#000000";  // 10 s+
+  if (ms >= 6000)  return "#003366";  // 6-10 s
+  if (ms >= 3000)  return "#0066cc";  // 3-6 s
+  if (ms >= 1500)  return "#3399ff";  // 1.5-3 s
+  if (ms >=  500)  return "#99ccff";  // 0.5-1.5 s
+  if (ms >    50)  return "#e5f2ff";  // 50-500 ms
+  return "#ffffff";                   // <50 ms
 }
 
-/* ---- grid dimensions ------------------------------------------- */
+/* ---------- grid dimensions -------------------------------------- */
 export const COLS = 12;
 export const ROWS = 8;
 export const defaultPanes = Array.from({ length: COLS * ROWS }, (_, i) => ({
@@ -19,7 +31,7 @@ export const defaultPanes = Array.from({ length: COLS * ROWS }, (_, i) => ({
   dwellMs: 0,
 }));
 
-/* ---- renderer --------------------------------------------------- */
+/* ---------- renderer --------------------------------------------- */
 export const PaneGrid = memo(function PaneGrid({ panes, getPaneRef }) {
   return (
     <div
@@ -29,8 +41,7 @@ export const PaneGrid = memo(function PaneGrid({ panes, getPaneRef }) {
         display: "grid",
         gridTemplateColumns: `repeat(${COLS}, 1fr)`,
         gridTemplateRows:    `repeat(${ROWS}, 1fr)`,
-        /* pointerEvents **ON** so elementFromPoint detects tiles */
-        zIndex: 1,
+        zIndex: 1,                // allow hit-testing
       }}
     >
       {panes.map((p) => (
@@ -39,7 +50,7 @@ export const PaneGrid = memo(function PaneGrid({ panes, getPaneRef }) {
           ref={(el) => getPaneRef(p.id, el)}
           data-pane-id={p.id}
           style={{
-            transition: "background 0.1s linear",
+            transition: "background 0.12s linear",
             background: dwellToColor(p.dwellMs),
             border: "1px solid #ffffff40",
           }}
