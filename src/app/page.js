@@ -5,34 +5,27 @@ import { FaceMesh } from "@mediapipe/face_mesh";
 import { Camera }   from "@mediapipe/camera_utils";
 import { PaneGrid, defaultPanes, COLS, ROWS } from "./components/PaneGrid";
 
+/* --- amplify gaze: 1.0 = no change, 1.5 gives +50 % reach -------------- */
+const GAIN = 5;
+
 export default function Home() {
-  /* ---------------------------------------------------------------
-   * refs & state
-   * ------------------------------------------------------------- */
+  /* refs & state -------------------------------------------------------- */
   const videoRef   = useRef(null);
   const faceMesh   = useRef(null);
   const lastT      = useRef(performance.now());
 
-  /* gaze-related */
   const [cursorPos, setCursorPos] = useState({ x: 0, y: 0 });
+  const [panes,     setPanes]     = useState(defaultPanes);
 
-  /* panes state – an array of {id, dwellMs} */
-  const [panes, setPanes] = useState(defaultPanes);
-  const paneRefs = useRef({});            // id → DOM node
-  const currentPaneId = useRef(null);     // id we’re gazing at this frame
+  const paneRefs       = useRef({});
+  const currentPaneId  = useRef(null);
 
-  /* expose ref setter for PaneGrid */
-  const getPaneRef = (id, el) => {
-    if (el) paneRefs.current[id] = el;
-  };
+  const getPaneRef = (id, el) => { if (el) paneRefs.current[id] = el; };
 
-  /* ---------------------------------------------------------------
-   * FaceMesh initialisation (once)
-   * ------------------------------------------------------------- */
+  /* FaceMesh init ------------------------------------------------------- */
   useEffect(() => {
     faceMesh.current = new FaceMesh({
-      locateFile: (f) =>
-        `https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh/${f}`,
+      locateFile: (f) => `https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh/${f}`,
     });
     faceMesh.current.setOptions({
       maxNumFaces: 1,
@@ -42,47 +35,53 @@ export default function Home() {
     });
   }, []);
 
-  /* ---------------------------------------------------------------
-   * Main vision loop – update cursor + dwell counters
-   * ------------------------------------------------------------- */
+  /* Vision loop --------------------------------------------------------- */
   useEffect(() => {
     if (!faceMesh.current) return;
 
     faceMesh.current.onResults(({ multiFaceLandmarks }) => {
       const now = performance.now();
-      const dt  = now - lastT.current;          // ms since previous frame
+      const dt  = now - lastT.current;
       lastT.current = now;
 
-      /* --- pick the pane we were staring at last frame and add dwell */
+      /* accumulate dwell time */
       if (currentPaneId.current !== null) {
         setPanes((prev) =>
           prev.map((p) =>
-            p.id === currentPaneId.current
-              ? { ...p, dwellMs: p.dwellMs + dt }
-              : p
+            p.id === currentPaneId.current ? { ...p, dwellMs: p.dwellMs + dt } : p
           )
         );
       }
 
-      /* --- update cursor (only need iris centre for coarse mapping) */
+      /* update cursor ---------------------------------------------------- */
       if (multiFaceLandmarks?.length) {
         const lm = multiFaceLandmarks[0];
-        const x = (lm[33].x + lm[263].x) / 2;   // normalised 0-1
-        const y = (lm[159].y + lm[386].y) / 2;
-        const screenX = (1 - x) * window.innerWidth;
-        const screenY = y * window.innerHeight;
+
+        /* 0-1 normalised iris midpoint */
+        const xNorm = (lm[33].x + lm[263].x) / 2;
+        const yNorm = (lm[159].y + lm[386].y) / 2;
+
+        /* centre-relative displacement, then amplify -------------------- */
+        const xAmp = 0.5 + GAIN * (0.5 - xNorm);  // invert X (mirror)
+        const yAmp = 0.5 + GAIN * (yNorm - 0.5);
+
+        /* clamp to viewport --------------------------------------------- */
+        const xClamped = Math.min(1, Math.max(0, xAmp));
+        const yClamped = Math.min(1, Math.max(0, yAmp));
+
+        const screenX = xClamped * window.innerWidth;
+        const screenY = yClamped * window.innerHeight;
         setCursorPos({ x: screenX, y: screenY });
 
-        /* hit-test vs panes */
+        /* hit-test ------------------------------------------------------- */
         const hit = document.elementFromPoint(screenX, screenY);
-        const id  = hit?.dataset?.paneId
+        currentPaneId.current = hit?.dataset?.paneId
           ? parseInt(hit.dataset.paneId, 10)
           : null;
-        currentPaneId.current = id;
       }
     });
 
-    /* --- start camera once ------------------------------------------------ */
+    /* start camera ------------------------------------------------------ */
     const cam = new Camera(videoRef.current, {
       onFrame: async () =>
         await faceMesh.current.send({ image: videoRef.current }),
@@ -90,26 +89,18 @@ export default function Home() {
       height: 480,
     });
     cam.start();
-
     return () => cam.stop();
   }, []);
 
-  /* ---------------------------------------------------------------
-   * rendering
-   * ------------------------------------------------------------- */
+  /* render -------------------------------------------------------------- */
   return (
     <div style={{ height: "100vh", overflow: "hidden", position: "relative" }}>
-      {/* hidden webcam video feed */}
       <video ref={videoRef} style={{ display: "none" }} />
 
       {/* full-screen attention grid */}
       <PaneGrid panes={panes} getPaneRef={(id, el) => {
-          if (el) {
-            el.dataset.paneId = id;       //  ← for hit-testing
-            getPaneRef(id, el);
-          }
-        }}
-      />
+        if (el) { el.dataset.paneId = id; getPaneRef(id, el); }
+      }}/>
 
       {/* gaze cursor */}
       <div
