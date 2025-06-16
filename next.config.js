@@ -1,12 +1,10 @@
-
 /** @type {import('next').NextConfig} */
 const config = {
-  typescript: {
-    ignoreBuildErrors: true,
-  },
-  eslint: {
-    ignoreDuringBuilds: true,
-  },
+  // ⬇– ignore type-checking errors during `next build`
+  typescript: { ignoreBuildErrors: true },
+
+  // ⬇– skip ESLint during `next build`
+  eslint: { ignoreDuringBuilds: true },
 };
 
-export default config;
+module.exports = config;   // ← CommonJS export (no “export default”)

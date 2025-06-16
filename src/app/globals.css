@@ -28,3 +28,7 @@ button {
 button:hover {
   background-color: #555;
 }
+
+.pane-light { background-color: #ffe5e5; }
+.pane-mid   { background-color: #ff6666; }
+.pane-deep  { background-color: #cc0000; }

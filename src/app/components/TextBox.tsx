@@ -1,58 +1,32 @@
-"use client";
-import React, { useRef } from "react";
+/* ------------------------------------------------------------------
+ *  Full-screen flex-grid that darkens a pane as dwell-time grows.
+ *  No refs are needed any more – page.js only needs data-pane-idx.
+ * ----------------------------------------------------------------*/
+import React from "react";
 
-export default function TextBox({
-  typedText,
-  setTypedText,
-  suggestions,
-  hoveredKey,
-  getKeyRef,
-  isShiftActive,
-}) {
-  const taRef = useRef(null);
+/* How many columns / rows do you want? */
+const COLS = 6;
+const ROWS = 4;
 
-  const choose = (w) => {
-    setTypedText((p) => p + (p.endsWith(" ") ? "" : " ") + w + " ");
-    taRef.current?.focus();
-  };
+/* Helper – build a default pane array if caller doesn’t supply one */
+export const defaultPanes = Array.from(
+  { length: COLS * ROWS },
+  () => ({ dwell: 0 })
+);
 
+export function PaneGrid({ panes }) {
   return (
-    <div className="flex flex-col items-center space-y-4 pt-4">
-      {/* textarea */}
-      <textarea
-        ref={taRef}
-        value={typedText}
-        onChange={(e) => setTypedText(e.target.value)}
-        className="w-1/2 min-h-[120px] p-2 border rounded-md"
-        placeholder="Start typing…"
-      />
-
-      {/* suggestion bar */}
-      <div className="flex gap-6 bg-gray-900 px-6 py-4 rounded-md">
-        {suggestions.map((w, i) => (
-          <button
-            key={i}
-            data-value={w}                 /* for gaze click */
-            ref={getKeyRef(`SUG${i}`)}     /* register as edge-top */
-            onClick={() => choose(w)}
-            style={{
-              color: "#fff",
-              padding: "8px 24px",
-              fontSize: 20,
-              border: "none",
-              background: hoveredKey === w ? "#555" : "transparent",
-              userSelect: "none",
-              cursor: "pointer",
-            }}
-          >
-            {w}
-          </button>
-        ))}
-      </div>
-
-      {isShiftActive && (
-        <div className="text-red-600 font-semibold">Shift key is active</div>
-      )}
+    <div
+      className="grid w-full h-full"
+      style={{ gridTemplateColumns: `repeat(${COLS}, 1fr)` }}
+    >
+      {panes.map((p, i) => (
+        <div
+          key={i}
+          data-pane-idx={i}
+          className={`transition-colors duration-100 ${p.className}`}
+        />
+      ))}
     </div>
   );
 }
