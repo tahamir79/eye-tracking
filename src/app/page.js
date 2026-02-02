@@ -1,52 +1,44 @@
-/* ====================================================================
- *  /src/app/page.js   – attention-heat-map + coordinate logger
- * ==================================================================== */
+/* ===========================================================
+   page.js  – gaze keyboard + heat-map + on-screen coordinates
+   =========================================================== */
 "use client";
 
 import React, { useEffect, useRef, useState, useCallback } from "react";
-import { FaceMesh }  from "@mediapipe/face_mesh";
-import { Camera }    from "@mediapipe/camera_utils";
-import {
-  PaneGrid,          // full-screen grid
-  defaultPanes,
-  COLS,
-  ROWS,
-} from "./components/PaneGrid";
+import { FaceMesh } from "@mediapipe/face_mesh";
+import { Camera   } from "@mediapipe/camera_utils";
+import { PaneGrid, defaultPanes, COLS, ROWS } from "./components/PaneGrid";
 
-/* ---------- tunables ---------- */
-const EAR_THRESHOLD  = 0.25;   // blink cut-off
-const GAZE_SCALE     = 7.5;    // ← 50 % more than 5.0
-const LOG_INTERVAL   = 500;    // ms – how often to print coordinates
-/* ------------------------------ */
+/* ---------- constants ------------------------------------ */
+const GAZE_SCALE     = 5.0;          // sensitivity
+const LOG_EVERY_MS   = 500;          // half-second logging cadence
 
+/* ==========  MAIN COMPONENT  ============================== */
 export default function Home() {
-  /* ───────── refs & state ─────── */
-  const videoRef     = useRef(null);
-  const faceMeshRef  = useRef(null);
+  const videoRef   = useRef(null);
+  const faceMesh   = useRef(null);
+  const lastT      = useRef(performance.now());
 
-  const lastT        = useRef(performance.now());           // dwell timer
-  const lastLogT     = useRef(performance.now());           // console timer
+  /* gaze & dwell */
+  const [cursorPos, setCursorPos] = useState({ x: 0, y: 0 });
+  const [panes,     setPanes    ] = useState(defaultPanes);
+  const currentPane = useRef(null);
 
-  const [cursor, setCursor] = useState({ x: 0, y: 0 });
+  /* on-screen coordinate log */
+  const [logs, setLogs]   = useState([]);          // array of strings
+  const lastLogT          = useRef(performance.now());
 
-  /* panes = [{ id , dwellMs }] */
-  const [panes, setPanes] = useState(defaultPanes);
-  const paneRefs   = useRef({});        // id → DOM node
-  const paneHitRef = useRef(null);      // id of pane gazed at this frame
-  const coordRef   = useRef(null);      // { x , y } bottom-origin coords
+  /* --------------------------------------------------------
+     REF HELPER so PaneGrid can store DOM nodes for hit-test
+     ------------------------------------------------------ */
+  const paneRefs = useRef({});
+  const getPaneRef = (id, el) => { if (el) paneRefs.current[id] = el; };
 
-  /* helper so <PaneGrid/> can hand us refs */
-  const getPaneRef = (id, el) => {
-    if (el) paneRefs.current[id] = el;
-  };
-
-  /* ───────── FaceMesh init (once) ───────── */
+  /* ---------- init MediaPipe FaceMesh -------------------- */
   useEffect(() => {
-    faceMeshRef.current = new FaceMesh({
-      locateFile: f =>
-        `https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh/${f}`,
+    faceMesh.current = new FaceMesh({
+      locateFile: (f) => `https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh/${f}`,
     });
-    faceMeshRef.current.setOptions({
+    faceMesh.current.setOptions({
       maxNumFaces: 1,
       refineLandmarks: true,
       minDetectionConfidence: 0.5,
@@ -54,96 +46,109 @@ export default function Home() {
     });
   }, []);
 
-  /* ───────── main vision loop ───────── */
+  /* ---------- main vision loop --------------------------- */
   useEffect(() => {
-    if (!faceMeshRef.current) return;
+    if (!faceMesh.current) return;
 
-    faceMeshRef.current.onResults(({ multiFaceLandmarks }) => {
+    faceMesh.current.onResults(({ multiFaceLandmarks }) => {
       const now  = performance.now();
-      const dt   = now - lastT.current;
+      const dt   = now - lastT.current;      /* ms since prev frame */
       lastT.current = now;
 
-      /* accumulate dwell for last pane */
-      if (paneHitRef.current !== null) {
-        setPanes(prev =>
-          prev.map(p =>
-            p.id === paneHitRef.current ? { ...p, dwellMs: p.dwellMs + dt } : p
+      /* accumulate dwell time on current tile */
+      if (currentPane.current !== null) {
+        setPanes((p) =>
+          p.map((tile) =>
+            tile.id === currentPane.current
+              ? { ...tile, dwellMs: tile.dwellMs + dt }
+              : tile
           )
         );
       }
 
-      /* nothing detected?  exit early */
-      if (!multiFaceLandmarks?.length) return;
+      /* ---- gaze & hit-test -------------------------------- */
+      if (multiFaceLandmarks?.length) {
+        const lm = multiFaceLandmarks[0];
 
-      /* --- gaze point ---------------------------------------------------- */
-      const lm = multiFaceLandmarks[0];
-      const x = (lm[33].x + lm[263].x) / 2;   // eyes centre (norm 0-1)
-      const y = (lm[159].y + lm[386].y) / 2;
+        /* simple iris centre average → (x,y) 0-1 */
+        const gx = ( (lm[33].x + lm[263].x) / 2 );
+        const gy = ( (lm[159].y + lm[386].y) / 2 );
+        const screenX = (1 - (0.5 + GAZE_SCALE * (gx - 0.5))) * innerWidth;
+        const screenY = (0.5 + GAZE_SCALE * (gy - 0.5)) * innerHeight;
 
-      let screenX = (1 - (0.5 + GAZE_SCALE * (x - 0.5))) * window.innerWidth;
-      let screenY = (0.5 + GAZE_SCALE * (y - 0.5)) * window.innerHeight;
-      setCursor({ x: screenX, y: screenY });
+        setCursorPos({ x: screenX, y: screenY });
 
-      /* --- hit-test vs panes -------------------------------------------- */
-      const hit = document.elementFromPoint(screenX, screenY);
-      const id  = hit?.dataset?.paneId ? parseInt(hit.dataset.paneId, 10) : null;
+        const hit = document.elementFromPoint(screenX, screenY);
+        const id  = hit?.dataset?.paneId ? parseInt(hit.dataset.paneId, 10) : null;
+        currentPane.current = id;
 
-      paneHitRef.current = id;
-
-      if (id !== null) {
-        /* convert to (col, row) top-origin */
-        const colTop  = id % COLS;
-        const rowTop  = Math.floor(id / COLS);
-        /* invert Y so bottom = 0 */
-        const rowBot  = ROWS - 1 - rowTop;
-        coordRef.current = { x: colTop, y: rowBot };
-      } else {
-        coordRef.current = null;
-      }
-
-      /* --- log every LOG_INTERVAL ms ------------------------------------ */
-      if (coordRef.current && now - lastLogT.current >= LOG_INTERVAL) {
-        const { x: cx, y: cy } = coordRef.current;
-        console.log(`pane (${cx},${cy})`);
-        lastLogT.current = now;
+        /* ---- coordinate log every LOG_EVERY_MS ------------ */
+        if (id !== null && now - lastLogT.current >= LOG_EVERY_MS) {
+          const col = id % COLS;                       // 0 → left
+          const rowTop = Math.floor(id / COLS);        // 0 → top
+          const row = ROWS - 1 - rowTop;               // 0 → bottom
+          const stamp = new Date().toLocaleTimeString();
+          const line  = `(${col}, ${row}) @ ${stamp}`;
+          setLogs((prev) => [...prev.slice(-29), line]); // keep last 30
+          lastLogT.current = now;
+        }
       }
     });
 
-    /* start camera ------------------------------------------------------- */
+    /* camera start ---------------------------------------- */
     const cam = new Camera(videoRef.current, {
       onFrame: async () =>
-        await faceMeshRef.current.send({ image: videoRef.current }),
+        await faceMesh.current.send({ image: videoRef.current }),
       width: 640,
       height: 480,
     });
     cam.start();
-
     return () => cam.stop();
   }, []);
 
-  /* ───────── render ───────── */
+  /* ------------------  UI  ------------------------------- */
   return (
     <div style={{ height: "100vh", overflow: "hidden", position: "relative" }}>
-      {/* hidden video feed */}
+      {/* hidden webcam */}
       <video ref={videoRef} style={{ display: "none" }} />
 
-      {/* heat-map grid */}
+      {/* full-screen heat-map grid */}
       <PaneGrid panes={panes} getPaneRef={getPaneRef} />
 
       {/* gaze cursor */}
       <div
         style={{
           position: "fixed",
-          left: cursor.x - 6,
-          top:  cursor.y - 6,
+          left: cursorPos.x - 6,
+          top:  cursorPos.y - 6,
           width: 12,
           height: 12,
           borderRadius: "50%",
-          background: "rgba(0,0,0,0.7)",
+          background: "rgba(0,0,0,0.75)",
           pointerEvents: "none",
-          zIndex: 2,
+          zIndex: 3,
         }}
       />
+
+      {/* coordinate log (top-right) */}
+      <div
+        style={{
+          position: "fixed",
+          right: 6,
+          top:   6,
+          fontSize: 12,
+          lineHeight: "1.3em",
+          color: "#000",
+          textAlign: "left",
+          zIndex: 4,
+          pointerEvents: "none",
+          userSelect: "none",
+        }}
+      >
+        {logs.map((ln, i) => (
+          <div key={i}>{ln}</div>
+        ))}
+      </div>
     </div>
   );
 }
