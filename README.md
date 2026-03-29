@@ -4,6 +4,7 @@ This project introduces a simple yet effective eye-tracking text-entry system po
 
 For a deployed demo, please visit this [Link](https://eye-tracking-k6sh-pndxhwrwd-stahmir79gmailcoms-projects.vercel.app)
 the demo may show slower performance compared to a local deployment.
+[Watch a live demo on Youtube](https://youtu.be/jGjqAPG925c?si=C1hJw3fkBgZ0ich2)
 
 ## Features
 
