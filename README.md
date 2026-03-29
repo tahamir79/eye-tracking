@@ -3,7 +3,7 @@
 This project introduces a simple yet effective eye-tracking text-entry system powered by a standard webcam and MediaPipe FaceMesh. By estimating the user's gaze on an on-screen keyboard and detecting blinks via the Eye Aspect Ratio (EAR), the interface enables hands-free typing. 
 
 For a deployed demo, please visit this [Link](https://eye-tracking-k6sh-pndxhwrwd-stahmir79gmailcoms-projects.vercel.app)
-the demo may show slower performance compared to a local deployment.
+the demo may show slower performance compared to a local deployment. <br>
 [Watch a live demo on Youtube](https://youtu.be/jGjqAPG925c?si=C1hJw3fkBgZ0ich2)
 
 ## Features
